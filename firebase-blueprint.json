@@ -1,0 +1,44 @@
+{
+  "collections": {
+    "users": {
+      "description": "User profile metadata",
+      "fields": {
+        "uid": "string",
+        "email": "string",
+        "displayName": "string",
+        "photoURL": "string",
+        "lastLogin": "number"
+      }
+    },
+    "students": {
+      "description": "Học sĩ triều đình and their companion pets metadata",
+      "fields": {
+        "id": "string",
+        "userId": "string",
+        "name": "string",
+        "gender": "string",
+        "className": "string",
+        "points": "number",
+        "history": "array",
+        "isAbsent": "boolean",
+        "egg": "map",
+        "pet": "map",
+        "pets": "array",
+        "updatedAt": "number"
+      }
+    },
+    "settings": {
+      "description": "Global custom configurations per user/teacher in the imperial court",
+      "fields": {
+        "userId": "string",
+        "ranksMale": "array",
+        "ranksFemale": "array",
+        "skills": "array",
+        "posSoundUrl": "string",
+        "negSoundUrl": "string",
+        "timerSoundUrl": "string",
+        "updatedAt": "number"
+      }
+    }
+  }
+}
