@@ -38,6 +38,145 @@ const sanitizeForFirestore = (val: any): any => {
 
 type Screen = 'school' | 'class' | 'profile' | 'settings';
 
+const AuthLoginForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
+  const { loginWithEmail, signUpWithEmail } = useAuth();
+  const [authTab, setAuthTab] = useState<'login' | 'register'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+
+    if (!email.trim() || !password.trim()) {
+      setErrorMsg("Vui lòng nhập đầy đủ Email và Mật khẩu.");
+      return;
+    }
+
+    if (authTab === 'register' && !displayName.trim()) {
+      setErrorMsg("Vui lòng nhập Tên sỹ phu / Tôn hiệu.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      if (authTab === 'login') {
+        await loginWithEmail(email.trim(), password);
+      } else {
+        await signUpWithEmail(email.trim(), password, displayName.trim());
+      }
+      if (onSuccess) onSuccess();
+    } catch (err: any) {
+      setErrorMsg(err.message || "Có lỗi xảy ra, vui lòng thử lại.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="w-full font-sans space-y-4">
+      {/* Tabs */}
+      <div className="flex bg-stone-100 p-1 rounded-2xl border border-stone-200">
+        <button
+          type="button"
+          onClick={() => { setAuthTab('login'); setErrorMsg(null); }}
+          className={`flex-1 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl transition-all ${
+            authTab === 'login'
+              ? 'bg-red-800 text-white shadow-md'
+              : 'text-stone-600 hover:text-stone-900'
+          }`}
+        >
+          🔑 Đăng Nhập
+        </button>
+        <button
+          type="button"
+          onClick={() => { setAuthTab('register'); setErrorMsg(null); }}
+          className={`flex-1 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl transition-all ${
+            authTab === 'register'
+              ? 'bg-red-800 text-white shadow-md'
+              : 'text-stone-600 hover:text-stone-900'
+          }`}
+        >
+          📜 Tạo Tài Khoản
+        </button>
+      </div>
+
+      {errorMsg && (
+        <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
+          <span>⚠️</span>
+          <span>{errorMsg}</span>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-3.5 text-left">
+        {authTab === 'register' && (
+          <div>
+            <label className="block text-[10px] font-black uppercase tracking-wider text-stone-500 mb-1">
+              Tên Sỹ Phu / Tôn Hiệu
+            </label>
+            <input
+              type="text"
+              required
+              value={displayName}
+              onChange={e => setDisplayName(e.target.value)}
+              placeholder="Ví dụ: Quan Trường Ngô Văn A"
+              className="w-full border border-stone-300 p-3 rounded-xl text-xs font-bold outline-none focus:ring-2 ring-red-800/30"
+            />
+          </div>
+        )}
+
+        <div>
+          <label className="block text-[10px] font-black uppercase tracking-wider text-stone-500 mb-1">
+            Địa chỉ Email
+          </label>
+          <input
+            type="email"
+            required
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="syphu@trieudinh.vn"
+            className="w-full border border-stone-300 p-3 rounded-xl text-xs font-bold outline-none focus:ring-2 ring-red-800/30"
+          />
+        </div>
+
+        <div>
+          <label className="block text-[10px] font-black uppercase tracking-wider text-stone-500 mb-1">
+            Mật khẩu
+          </label>
+          <input
+            type="password"
+            required
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="••••••••"
+            className="w-full border border-stone-300 p-3 rounded-xl text-xs font-bold outline-none focus:ring-2 ring-red-800/30"
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={submitting}
+          className="w-full bg-gradient-to-r from-red-800 to-red-900 hover:from-red-700 hover:to-red-800 text-white font-extrabold py-3.5 rounded-xl shadow-lg hover:shadow-xl active:scale-95 transition-all text-xs uppercase tracking-wider border-b-4 border-red-950 disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          {submitting ? (
+            <>
+              <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <span>Đang Xử Lý...</span>
+            </>
+          ) : authTab === 'login' ? (
+            <span>🚀 Đăng Nhập Sỹ Phu</span>
+          ) : (
+            <span>✨ Tạo Tài Khoản Mới</span>
+          )}
+        </button>
+      </form>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [ranksMale, setRanksMale] = useState<RankInfo[]>(DEFAULT_RANKS_MALE);
@@ -147,11 +286,14 @@ const App: React.FC = () => {
   const [timerSoundUrl, setTimerSoundUrl] = useState('https://actions.google.com/sounds/v1/alarms/bugle_tune.ogg');
 
   // Cloud Sync properties
-  const { user, profile, signInWithGoogle, logout, updateUserProfile, loading: authLoading } = useAuth();
+  const { user, profile, loginWithEmail, signUpWithEmail, signInWithGoogle, logout, updateUserProfile, loading: authLoading } = useAuth();
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncedTime, setLastSyncedTime] = useState<number | null>(null);
   const [initialCloudLoadComplete, setInitialCloudLoadComplete] = useState(false);
   const [cloudLoadSuccess, setCloudLoadSuccess] = useState(false);
+
+  // Reference to store last synced state snapshot for differential sync
+  const lastSyncedSnapshotRef = useRef<string>('');
 
   // User Profile Modal State
   const [showUserModal, setShowUserModal] = useState(false);
@@ -178,6 +320,7 @@ const App: React.FC = () => {
       setInitialCloudLoadComplete(false);
       setCloudLoadSuccess(false);
       setLastSyncedTime(null);
+      lastSyncedSnapshotRef.current = '';
       return;
     }
 
@@ -203,6 +346,18 @@ const App: React.FC = () => {
             localStorage.setItem('custom_ludo_tiles', JSON.stringify(cloudData.customLudoTiles));
           }
           setLastSyncedTime(cloudData.updatedAt || Date.now());
+
+          // Save snapshot ref to prevent immediate re-sync of unchanged data
+          lastSyncedSnapshotRef.current = JSON.stringify({
+            students: cloudData.students || [],
+            ranksMale: cloudData.ranksMale || [],
+            ranksFemale: cloudData.ranksFemale || [],
+            skills: cloudData.skills || [],
+            posSoundUrl: cloudData.posSoundUrl || '',
+            negSoundUrl: cloudData.negSoundUrl || '',
+            timerSoundUrl: cloudData.timerSoundUrl || '',
+            customLudoTiles: cloudData.customLudoTiles || {}
+          });
 
           // Also save a fallback local copy
           localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudData.students || []));
@@ -245,6 +400,17 @@ const App: React.FC = () => {
             timerSoundUrl: timerSoundUrl,
             updatedAt: Date.now()
           }));
+
+          lastSyncedSnapshotRef.current = JSON.stringify({
+            students: localStudents,
+            ranksMale: localMaleRanks,
+            ranksFemale: localFemaleRanks,
+            skills: localSkills,
+            posSoundUrl,
+            negSoundUrl,
+            timerSoundUrl,
+            customLudoTiles
+          });
           
           setStudents(localStudents);
           setRanksMale(localMaleRanks);
@@ -270,6 +436,24 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!user || !initialCloudLoadComplete || !cloudLoadSuccess) return;
 
+    const currentSnapshot = JSON.stringify({
+      students,
+      ranksMale,
+      ranksFemale,
+      skills,
+      posSoundUrl,
+      negSoundUrl,
+      timerSoundUrl,
+      customLudoTiles
+    });
+
+    // DIFFERENTIAL INCREMENTAL SYNC CHECK:
+    // Only perform auto-sync if current data is DIFFERENT from the last synced snapshot!
+    // If nothing changed, we skip cloud writes completely to preserve existing data and save bandwidth.
+    if (currentSnapshot === lastSyncedSnapshotRef.current) {
+      return;
+    }
+
     const timer = setTimeout(async () => {
       setIsSyncing(true);
       try {
@@ -288,13 +472,15 @@ const App: React.FC = () => {
           customLudoTiles,
           updatedAt: Date.now()
         }), { merge: true });
+
+        lastSyncedSnapshotRef.current = currentSnapshot;
         setLastSyncedTime(Date.now());
       } catch (err) {
         console.error("Auto-sync to cloud failed:", err);
       } finally {
         setIsSyncing(false);
       }
-    }, 1500); // 1.5s debounce to group intensive double-clicking/incremental updates together!
+    }, 1500); // 1.5s debounce to group multiple rapid edits together
 
     return () => clearTimeout(timer);
   }, [students, ranksMale, ranksFemale, skills, posSoundUrl, negSoundUrl, timerSoundUrl, customLudoTiles, user, initialCloudLoadComplete, cloudLoadSuccess]);
@@ -1650,15 +1836,19 @@ const App: React.FC = () => {
             đồng bộ học lục và thăng hoa tiên thú triều đình.
           </p>
 
-          <div className="pt-4 w-full">
+          <div className="pt-2 w-full">
+            <AuthLoginForm />
+          </div>
+
+          <div className="pt-2 w-full border-t border-stone-200">
             <button
               onClick={signInWithGoogle}
-              className="w-full flex items-center justify-center gap-3 bg-[#D4AF37] hover:bg-amber-600 text-white font-extrabold py-4 px-6 rounded-2xl shadow-xl hover:shadow-2xl active:translate-y-px transition-all uppercase text-sm border-b-4 border-amber-700 font-sans tracking-wide"
+              className="w-full text-stone-500 hover:text-stone-800 text-xs font-bold py-2 px-4 rounded-xl transition-all flex items-center justify-center gap-2 border border-stone-200 hover:bg-stone-50"
             >
-              <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
                 <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.41 0-6.177-2.767-6.177-6.177S10.58 6.16 13.99 6.16c1.55 0 2.96.57 4.05 1.51l3.07-3.07C19.22 2.82 16.78 1.8 13.99 1.8 8.16 1.8 3.42 6.54 3.42 12.37s4.74 10.57 10.57 10.57c6.14 0 10.23-4.31 10.23-10.4 0-.7-.08-1.2-.18-1.57H12.24z" />
               </svg>
-              Đăng nhập bằng Google
+              Đăng nhập bằng Google (Dự phòng)
             </button>
           </div>
 
@@ -2722,6 +2912,31 @@ const App: React.FC = () => {
                   <h3 className="text-2xl font-royal text-red-800">Dữ Liệu Quốc Gia</h3>
                   <p className="text-xs text-red-700/60 font-medium">Bảo lưu thư tịch và quản lý danh tính sỹ phu toàn bộ hệ thống triều đình</p>
                </div>
+
+               {/* Auto-Sync Explanation Card */}
+               <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-6 rounded-3xl border-2 border-amber-300 text-left space-y-3">
+                 <div className="flex items-center gap-3 border-b border-amber-200 pb-2">
+                   <span className="text-2xl">⚡☁️</span>
+                   <div>
+                     <h4 className="font-extrabold text-amber-950 text-sm uppercase">Cơ Chế & Tần Suất Sao Lưu Tự Động (Auto Cloud Sync)</h4>
+                     <p className="text-[11px] text-amber-800 font-medium">Chi tiết về tần suất, phương thức so sánh và bảo toàn dữ liệu của bạn</p>
+                   </div>
+                 </div>
+                 <div className="space-y-2.5 text-xs text-amber-900 leading-relaxed font-sans">
+                   <div className="flex items-start gap-2">
+                     <span className="font-black text-amber-800 shrink-0">⏱️ Tần suất sao lưu (Debounce 1.5s):</span>
+                     <span>Khi bạn chỉnh sửa dữ liệu (cộng/trừ điểm, thêm sỹ tử, thay đổi rank...), hệ thống đợi 1.5 giây sau thao tác cuối cùng để dồn tất cả thay đổi rồi mới thực hiện sao lưu. Giúp bạn thao tác điểm nhanh liên tục mà không lo giật lag.</span>
+                   </div>
+                   <div className="flex items-start gap-2">
+                     <span className="font-black text-amber-800 shrink-0">🛡️ Giữ nguyên data cũ (Differential Sync):</span>
+                     <span>Trước khi gửi dữ liệu lên Đám mây, hệ thống so sánh snapshot dữ liệu hiện tại với bản đã lưu gần nhất. Nếu <strong>không có thay đổi mới</strong>, hệ thống <strong>bỏ qua hoàn toàn (skip sync)</strong> và giữ nguyên bản sao cũ trên đám mây.</span>
+                   </div>
+                   <div className="flex items-start gap-2">
+                     <span className="font-black text-amber-800 shrink-0">✨ Chỉ cập nhật data mới:</span>
+                     <span>Chỉ khi phát hiện có dữ liệu mới hoặc chỉnh sửa mới, hệ thống mới tiến hành cập nhật hợp nhất (<code>merge: true</code>) dữ liệu mới vào tài khoản Đám mây của quý Quan trường.</span>
+                   </div>
+                 </div>
+               </div>
                
                {/* Excel section */}
                <div className="bg-white p-6 rounded-3xl border border-red-100 flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -3641,128 +3856,158 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL: USER PROFILE / LOGOUT */}
+      {/* MODAL: USER PROFILE / AUTH / LOGOUT */}
       {showUserModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
-          <div className="bg-white w-full max-w-sm rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in duration-300 border-4 border-[#D4AF37]">
-            <div className="bg-red-800 p-8 text-center text-white relative">
-              <button onClick={() => setShowUserModal(false)} className="absolute top-6 right-6 text-2xl text-white/70 hover:text-white transition-colors">&times;</button>
-              <div className="relative inline-block mb-4 mt-2">
-                <img 
-                  src={editingPhotoURL || 'https://api.dicebear.com/7.x/bottts/svg'} 
-                  className="w-24 h-24 rounded-full border-4 border-amber-400 shadow-xl object-cover mx-auto" 
-                  referrerPolicy="no-referrer"
-                  alt="Review Avatar"
-                />
-              </div>
-              <h2 className="text-2xl font-royal font-bold uppercase tracking-wide animate-pulse">Danh Tính Sỹ Phu</h2>
-              <p className="text-[10px] text-amber-300 font-mono mt-1 opacity-80">{user?.email}</p>
+          <div className="bg-white w-full max-w-md rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in duration-300 border-4 border-[#D4AF37]">
+            <div className="bg-red-800 p-6 text-center text-white relative">
+              <button onClick={() => setShowUserModal(false)} className="absolute top-4 right-5 text-2xl text-white/70 hover:text-white transition-colors">&times;</button>
+              
+              {user ? (
+                <>
+                  <div className="relative inline-block mb-3 mt-1">
+                    <img 
+                      src={editingPhotoURL || 'https://api.dicebear.com/7.x/bottts/svg'} 
+                      className="w-20 h-20 rounded-full border-4 border-amber-400 shadow-xl object-cover mx-auto" 
+                      referrerPolicy="no-referrer"
+                      alt="Review Avatar"
+                    />
+                  </div>
+                  <h2 className="text-xl font-royal font-bold uppercase tracking-wide">Danh Tính Sỹ Phu</h2>
+                  <p className="text-[10px] text-amber-300 font-mono mt-0.5 opacity-80">{user.email}</p>
+                </>
+              ) : (
+                <div className="py-2">
+                  <div className="w-12 h-12 bg-amber-400 rounded-full flex items-center justify-center text-2xl mx-auto mb-2 border-2 border-amber-200">
+                    🏮
+                  </div>
+                  <h2 className="text-xl font-royal font-bold uppercase tracking-wide">Đăng Nhập Sỹ Phu</h2>
+                  <p className="text-[10px] text-amber-200 mt-0.5">Kết nối tài khoản để tự động sao lưu đám mây</p>
+                </div>
+              )}
             </div>
             
-            <div className="p-8 space-y-6">
-              {/* Change Display Name */}
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-wider text-stone-400 font-sans">Tôn Hiệu / Tên Hiển Thị</label>
-                <input 
-                  type="text" 
-                  className="w-full border p-3 rounded-2xl text-sm font-bold outline-none focus:ring-2 ring-red-800/20 font-sans" 
-                  value={editingDisplayName} 
-                  onChange={e => setEditingDisplayName(e.target.value)}
-                  placeholder="Gõ tên hiển thị..."
-                />
-              </div>
+            <div className="p-6 space-y-5">
+              {!user ? (
+                <AuthLoginForm onSuccess={() => setShowUserModal(false)} />
+              ) : (
+                <>
+                  {/* Change Display Name */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-stone-400 font-sans">Tôn Hiệu / Tên Hiển Thị</label>
+                    <input 
+                      type="text" 
+                      className="w-full border p-2.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 ring-red-800/20 font-sans" 
+                      value={editingDisplayName} 
+                      onChange={e => setEditingDisplayName(e.target.value)}
+                      placeholder="Gõ tên hiển thị..."
+                    />
+                  </div>
 
-              {/* Change Photo URL */}
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-wider text-stone-400 font-sans">Ảnh Đại Diện (URL)</label>
-                <input 
-                  type="text" 
-                  className="w-full border p-3 rounded-2xl text-xs font-medium outline-none focus:ring-2 ring-red-800/20 font-sans" 
-                  value={editingPhotoURL} 
-                  onChange={e => setEditingPhotoURL(e.target.value)}
-                  placeholder="Dán link ảnh bảo ảnh..."
-                />
-              </div>
+                  {/* Change Photo URL */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-stone-400 font-sans">Ảnh Đại Diện (URL)</label>
+                    <input 
+                      type="text" 
+                      className="w-full border p-2.5 rounded-2xl text-xs font-medium outline-none focus:ring-2 ring-red-800/20 font-sans" 
+                      value={editingPhotoURL} 
+                      onChange={e => setEditingPhotoURL(e.target.value)}
+                      placeholder="Dán link ảnh bảo ảnh..."
+                    />
+                  </div>
 
-              {/* Quick Avatars Picker */}
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-wider text-stone-400 block mb-2 font-sans text-center">Thần Tướng Gợi Ý</label>
-                <div className="flex gap-2.5 justify-center">
-                  {[
-                    "https://api.dicebear.com/7.x/adventurer/svg?seed=Lucky",
-                    "https://api.dicebear.com/7.x/adventurer/svg?seed=Aneka",
-                    "https://api.dicebear.com/7.x/bottts/svg?seed=Sparks",
-                    "https://api.dicebear.com/7.x/lorelei/svg?seed=Willow"
-                  ].map((url, i) => (
-                    <button 
-                      key={i} 
-                      onClick={() => setEditingPhotoURL(url)} 
-                      className={`w-11 h-11 rounded-full overflow-hidden border-2 transition-all p-0.5 bg-gray-50 hover:scale-110 active:scale-95 ${editingPhotoURL === url ? 'border-red-800 scale-110 shadow-md' : 'border-gray-200'}`}
-                    >
-                      <img src={url} className="w-full h-full object-cover rounded-full" alt="option" referrerPolicy="no-referrer" />
-                    </button>
-                  ))}
-                </div>
-              </div>
+                  {/* Quick Avatars Picker */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-stone-400 block font-sans text-center">Thần Tướng Gợi Ý</label>
+                    <div className="flex gap-2 justify-center">
+                      {[
+                        "https://api.dicebear.com/7.x/adventurer/svg?seed=Lucky",
+                        "https://api.dicebear.com/7.x/adventurer/svg?seed=Aneka",
+                        "https://api.dicebear.com/7.x/bottts/svg?seed=Sparks",
+                        "https://api.dicebear.com/7.x/lorelei/svg?seed=Willow"
+                      ].map((url, i) => (
+                        <button 
+                          key={i} 
+                          onClick={() => setEditingPhotoURL(url)} 
+                          className={`w-9 h-9 rounded-full overflow-hidden border-2 transition-all p-0.5 bg-gray-50 hover:scale-110 active:scale-95 ${editingPhotoURL === url ? 'border-red-800 scale-110 shadow-md' : 'border-gray-200'}`}
+                        >
+                          <img src={url} className="w-full h-full object-cover rounded-full" alt="option" referrerPolicy="no-referrer" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-              <div className="pt-4 space-y-3 font-sans">
-                <button 
-                  onClick={async () => {
-                    if (!editingDisplayName.trim()) {
-                      alert("Vui lòng nhập tên hiển thị.");
-                      return;
-                    }
-                    setProfileSaving(true);
-                    try {
-                      await updateUserProfile(editingDisplayName, editingPhotoURL);
-                      alert("Đã lưu thông tin sỹ phu thành công!");
-                      setShowUserModal(false);
-                    } catch (err) {
-                      alert("Có lỗi xảy ra: " + (err instanceof Error ? err.message : String(err)));
-                    } finally {
-                      setProfileSaving(false);
-                    }
-                  }}
-                  disabled={profileSaving}
-                  className="w-full bg-red-800 text-white py-4 rounded-xl font-bold uppercase tracking-wider hover:bg-red-900 shadow-lg text-xs transition-all disabled:opacity-50"
-                >
-                  {profileSaving ? "Đang Ghi Sách..." : "Lưu Thay Đổi"}
-                </button>
+                  {/* Cloud Sync Status Info */}
+                  <div className="bg-amber-50 p-3 rounded-2xl border border-amber-200 text-left text-[11px] font-sans text-amber-900 space-y-1">
+                    <div className="font-bold flex items-center justify-between text-amber-950">
+                      <span>⚡ Trạng thái Auto Sync:</span>
+                      <span className="text-[9px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-mono font-bold">ĐÃ KÍCH HOẠT</span>
+                    </div>
+                    <p className="leading-snug text-[10px] text-amber-800">
+                      Tự động sao lưu sau 1.5s khi có thay đổi mới. Dữ liệu cũ không đổi sẽ được giữ nguyên (Differential Sync).
+                    </p>
+                  </div>
 
-                {!confirmLogout ? (
-                  <button 
-                    onClick={() => setConfirmLogout(true)}
-                    className="w-full bg-[#fcf8e3] hover:bg-amber-100/50 text-amber-800 border border-amber-300 py-3 rounded-xl font-bold uppercase text-[9px] tracking-widest transition-all text-center leading-normal"
-                  >
-                    🚪 Đăng Xuất Khỏi Triều Đình
-                  </button>
-                ) : (
-                  <div className="flex gap-2 w-full animate-in fade-in duration-200">
+                  <div className="pt-2 space-y-2.5 font-sans">
                     <button 
                       onClick={async () => {
-                        await logout();
-                        setShowUserModal(false);
-                        setConfirmLogout(false);
-                        // Clear states
-                        setStudents([]);
-                        setRanksMale(DEFAULT_RANKS_MALE);
-                        setRanksFemale(DEFAULT_RANKS_FEMALE);
-                        setSkills(DEFAULT_SKILLS);
-                        setInitialCloudLoadComplete(false);
+                        if (!editingDisplayName.trim()) {
+                          alert("Vui lòng nhập tên hiển thị.");
+                          return;
+                        }
+                        setProfileSaving(true);
+                        try {
+                          await updateUserProfile(editingDisplayName, editingPhotoURL);
+                          alert("Đã lưu thông tin sỹ phu thành công!");
+                          setShowUserModal(false);
+                        } catch (err) {
+                          alert("Có lỗi xảy ra: " + (err instanceof Error ? err.message : String(err)));
+                        } finally {
+                          setProfileSaving(false);
+                        }
                       }}
-                      className="flex-1 bg-red-800 text-white py-3 rounded-xl font-bold uppercase text-[9px] tracking-widest hover:bg-red-900 transition-all text-center"
+                      disabled={profileSaving}
+                      className="w-full bg-red-800 text-white py-3 rounded-xl font-bold uppercase tracking-wider hover:bg-red-900 shadow-lg text-xs transition-all disabled:opacity-50"
                     >
-                      Xác nhận đăng xuất
+                      {profileSaving ? "Đang Ghi Sách..." : "Lưu Thay Đổi"}
                     </button>
-                    <button 
-                      onClick={() => setConfirmLogout(false)}
-                      className="flex-1 bg-stone-100 text-stone-600 border border-stone-200 py-3 rounded-xl font-bold uppercase text-[9px] tracking-widest hover:bg-stone-200 transition-all text-center"
-                    >
-                      Quay Lại
-                    </button>
+
+                    {!confirmLogout ? (
+                      <button 
+                        onClick={() => setConfirmLogout(true)}
+                        className="w-full bg-[#fcf8e3] hover:bg-amber-100/50 text-amber-800 border border-amber-300 py-2.5 rounded-xl font-bold uppercase text-[9px] tracking-widest transition-all text-center leading-normal"
+                      >
+                        🚪 Đăng Xuất Khỏi Triều Đình
+                      </button>
+                    ) : (
+                      <div className="flex gap-2 w-full animate-in fade-in duration-200">
+                        <button 
+                          onClick={async () => {
+                            await logout();
+                            setShowUserModal(false);
+                            setConfirmLogout(false);
+                            // Clear states
+                            setStudents([]);
+                            setRanksMale(DEFAULT_RANKS_MALE);
+                            setRanksFemale(DEFAULT_RANKS_FEMALE);
+                            setSkills(DEFAULT_SKILLS);
+                            setInitialCloudLoadComplete(false);
+                          }}
+                          className="flex-1 bg-red-800 text-white py-2.5 rounded-xl font-bold uppercase text-[9px] tracking-widest hover:bg-red-900 transition-all text-center"
+                        >
+                          Xác nhận đăng xuất
+                        </button>
+                        <button 
+                          onClick={() => setConfirmLogout(false)}
+                          className="flex-1 bg-stone-100 text-stone-600 border border-stone-200 py-2.5 rounded-xl font-bold uppercase text-[9px] tracking-widest hover:bg-stone-200 transition-all text-center"
+                        >
+                          Quay Lại
+                        </button>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                </>
+              )}
             </div>
           </div>
         </div>

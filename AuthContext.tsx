@@ -1,5 +1,13 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { User, onAuthStateChanged, signInWithPopup, signOut, updateProfile } from "firebase/auth";
+import { 
+  User, 
+  onAuthStateChanged, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signInWithPopup, 
+  signOut, 
+  updateProfile 
+} from "firebase/auth";
 import { auth, googleProvider } from "./firebase";
 import { doc, setDoc, onSnapshot } from "firebase/firestore";
 import { db } from "./firebase";
@@ -14,6 +22,8 @@ interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
+  loginWithEmail: (email: string, pass: string) => Promise<void>;
+  signUpWithEmail: (email: string, pass: string, displayName: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   updateUserProfile: (displayName: string, photoURL: string) => Promise<void>;
@@ -90,12 +100,64 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
+  const loginWithEmail = async (email: string, pass: string) => {
+    try {
+      await signInWithEmailAndPassword(auth, email, pass);
+    } catch (err: any) {
+      console.error("Email login failure:", err);
+      let msg = "Đăng nhập thất bại.";
+      if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
+        msg = "Email hoặc mật khẩu không chính xác.";
+      } else if (err.code === "auth/invalid-email") {
+        msg = "Địa chỉ Email không hợp lệ.";
+      } else if (err.message) {
+        msg = err.message;
+      }
+      throw new Error(msg);
+    }
+  };
+
+  const signUpWithEmail = async (email: string, pass: string, displayName: string) => {
+    try {
+      const res = await createUserWithEmailAndPassword(auth, email, pass);
+      const defaultAvatar = "https://api.dicebear.com/7.x/adventurer/svg?seed=" + encodeURIComponent(displayName || "Sỹ Phu");
+      if (res.user) {
+        await updateProfile(res.user, {
+          displayName: displayName || "Học sĩ triều đình",
+          photoURL: defaultAvatar
+        });
+        const userDocRef = doc(db, "users", res.user.uid);
+        await setDoc(userDocRef, {
+          uid: res.user.uid,
+          email: email,
+          displayName: displayName || "Học sĩ triều đình",
+          photoURL: defaultAvatar,
+          createdAt: Date.now(),
+          lastLogin: Date.now()
+        }, { merge: true });
+      }
+    } catch (err: any) {
+      console.error("Email sign up failure:", err);
+      let msg = "Đăng ký thất bại.";
+      if (err.code === "auth/email-already-in-use") {
+        msg = "Địa chỉ Email này đã được sử dụng.";
+      } else if (err.code === "auth/weak-password") {
+        msg = "Mật khẩu quá yếu (cần tối thiểu 6 ký tự).";
+      } else if (err.code === "auth/invalid-email") {
+        msg = "Địa chỉ Email không hợp lệ.";
+      } else if (err.message) {
+        msg = err.message;
+      }
+      throw new Error(msg);
+    }
+  };
+
   const signInWithGoogle = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
       console.error("Google sign in failure:", err);
-      alert("Đăng nhập thất bại: Nếu bạn đang chạy ứng dụng trong iFrame, hãy click mở ứng dụng ở Tab mới (Open in new tab) để tránh chính sách Sandbox của trình duyệt chặn Popup Google!");
+      alert("Đăng nhập Google thất bại: Nếu bạn đang chạy ứng dụng trong iFrame, hãy sử dụng Đăng nhập bằng Email & Mật khẩu!");
       throw err;
     }
   };
@@ -127,7 +189,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signInWithGoogle, logout, updateUserProfile }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      profile, 
+      loading, 
+      loginWithEmail, 
+      signUpWithEmail, 
+      signInWithGoogle, 
+      logout, 
+      updateUserProfile 
+    }}>
       {children}
     </AuthContext.Provider>
   );
@@ -138,3 +209,4 @@ export const useAuth = () => {
   if (!context) throw new Error("useAuth must be used inside AuthProvider");
   return context;
 };
+
