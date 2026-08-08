@@ -575,12 +575,6 @@ const App: React.FC = () => {
     localStorage.setItem(PET_SKILLS_KEY, JSON.stringify(petSkills));
   }, [petSkills]);
 
-  useEffect(() => {
-    if (ludoActiveStudent && ludoActiveStudent.className !== activeLudoClassName) {
-      setLudoActiveStudent(null);
-    }
-  }, [activeLudoClassName, ludoActiveStudent]);
-
   // Remind user to backup to cloud before leaving/closing tab
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -704,6 +698,12 @@ const App: React.FC = () => {
       .filter(s => s.className === activeLudoClassName && !s.isAbsent)
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [students, activeLudoClassName]);
+
+  useEffect(() => {
+    if (ludoActiveStudent && ludoActiveStudent.className !== activeLudoClassName) {
+      setLudoActiveStudent(null);
+    }
+  }, [activeLudoClassName, ludoActiveStudent]);
 
   const formattedClockTime = currentTime.toLocaleTimeString('vi-VN', {
     hour: '2-digit',
