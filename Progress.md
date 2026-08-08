@@ -1,0 +1,36 @@
+# Progress
+
+## Completed
+
+- Migrated authentication from Firebase Auth to Supabase Auth in `AuthContext.tsx`.
+- Migrated cloud data sync from Firestore to Supabase in `App.tsx`.
+- Added `supabaseClient.ts` for Vite Supabase environment config.
+- Added `supabaseData.ts` for reading/writing the per-user cloud snapshot.
+- Added `supabase-schema.sql` with `profiles`, `user_settings`, RLS policies, and a profile creation trigger.
+- Removed Firebase runtime files and dependency:
+  - `firebase.ts`
+  - `firebase-applet-config.json`
+  - `firebase-blueprint.json`
+  - `firestore.rules`
+  - `firebase` package
+- Removed stale `bun.lock` because Bun is not installed here and the lockfile still referenced Firebase.
+- Verified production build with `npm run build`.
+- Ran `npm audit fix`; `npm audit` now reports 0 vulnerabilities.
+
+## Manual Steps Needed
+
+1. In Supabase, open SQL Editor and run the full contents of `supabase-schema.sql`.
+2. In Supabase Auth, make sure Email login is enabled.
+3. If users cannot log in right after signing up, either confirm their email from the Supabase email, or disable required email confirmation for development/testing.
+4. In Supabase Auth URL settings, add your deployed Vercel domain as an allowed site/redirect URL. Add `http://localhost:3000` too if you test locally.
+5. In Vercel Environment Variables, confirm these exact names exist:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+6. Redeploy Vercel after changing environment variables.
+7. Optional: If you want Google login, enable the Google provider in Supabase Auth and configure its OAuth redirect URLs.
+
+## Notes
+
+- Existing Firebase/Firestore cloud data is not automatically migrated because this repo does not contain Firebase admin credentials or an export file.
+- Local browser data still migrates automatically to Supabase on the first successful login.
+- The most likely reason a newly created Supabase account cannot log in is required email confirmation.

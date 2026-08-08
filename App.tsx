@@ -12,29 +12,8 @@ import { LiquidDock } from './components/LiquidDock';
 import { generateEdict } from './geminiService';
 import { LIST_POKEMONS, LIST_ACCESSORIES, LIST_PET_SKILLS, getRandomPokemon, getEvolvedForm } from './pokemonData';
 import { useAuth } from './AuthContext';
+import { fetchUserSettings, upsertUserSettings } from './supabaseData';
 
-
-const sanitizeForFirestore = (val: any): any => {
-  if (val === undefined) return null;
-  if (val === null) return null;
-  if (Array.isArray(val)) {
-    return val.map(sanitizeForFirestore);
-  }
-  if (typeof val === 'object') {
-    if (val instanceof Date) return val;
-    const clean: any = {};
-    for (const key in val) {
-      if (Object.prototype.hasOwnProperty.call(val, key)) {
-        const v = val[key];
-        if (v !== undefined) {
-          clean[key] = sanitizeForFirestore(v);
-        }
-      }
-    }
-    return clean;
-  }
-  return val;
-};
 
 type Screen = 'school' | 'class' | 'profile' | 'settings';
 
@@ -66,7 +45,12 @@ const AuthLoginForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
       if (authTab === 'login') {
         await loginWithEmail(email.trim(), password);
       } else {
-        await signUpWithEmail(email.trim(), password, displayName.trim());
+        const result = await signUpWithEmail(email.trim(), password, displayName.trim());
+        if (result.needsEmailConfirmation) {
+          setAuthTab('login');
+          setErrorMsg("Tài khoản đã được tạo. Vui lòng mở email xác nhận từ Supabase rồi quay lại đăng nhập.");
+          return;
+        }
       }
       if (onSuccess) onSuccess();
     } catch (err: any) {
@@ -312,7 +296,7 @@ const App: React.FC = () => {
     }
   }, [profile, showUserModal]);
 
-  // Sync state FROM Firestore on login (high priority)
+  // Sync state FROM Supabase on login (high priority)
   useEffect(() => {
     if (authLoading) return;
 
@@ -327,13 +311,9 @@ const App: React.FC = () => {
     const fetchCloudData = async () => {
       setIsSyncing(true);
       try {
-        const { doc, getDoc, setDoc } = await import("firebase/firestore");
-        const { db } = await import("./firebase");
-        const docRef = doc(db, "settings", user.uid);
-        const docSnap = await getDoc(docRef);
+        const cloudData = await fetchUserSettings(user.uid);
 
-        if (docSnap.exists()) {
-          const cloudData = docSnap.data();
+        if (cloudData) {
           if (cloudData.students && Array.isArray(cloudData.students)) setStudents(cloudData.students);
           if (cloudData.ranksMale && Array.isArray(cloudData.ranksMale)) setRanksMale(cloudData.ranksMale);
           if (cloudData.ranksFemale && Array.isArray(cloudData.ranksFemale)) setRanksFemale(cloudData.ranksFemale);
@@ -389,17 +369,16 @@ const App: React.FC = () => {
           const localSkills = savedSkills ? JSON.parse(savedSkills) : DEFAULT_SKILLS;
 
           // Push local state to cloud to prevent data loss on onboarding
-          await setDoc(docRef, sanitizeForFirestore({
-            userId: user.uid,
+          const updatedAt = await upsertUserSettings(user.uid, {
             students: localStudents,
             ranksMale: localMaleRanks,
             ranksFemale: localFemaleRanks,
             skills: localSkills,
-            posSoundUrl: posSoundUrl,
-            negSoundUrl: negSoundUrl,
-            timerSoundUrl: timerSoundUrl,
-            updatedAt: Date.now()
-          }));
+            posSoundUrl,
+            negSoundUrl,
+            timerSoundUrl,
+            customLudoTiles
+          });
 
           lastSyncedSnapshotRef.current = JSON.stringify({
             students: localStudents,
@@ -416,12 +395,12 @@ const App: React.FC = () => {
           setRanksMale(localMaleRanks);
           setRanksFemale(localFemaleRanks);
           setSkills(localSkills);
-          setLastSyncedTime(Date.now());
+          setLastSyncedTime(updatedAt);
         }
         setCloudLoadSuccess(true);
         setInitialCloudLoadComplete(true);
       } catch (err) {
-        console.error("Error pulling database sync from Firestore:", err);
+        console.error("Error pulling database sync from Supabase:", err);
         setCloudLoadSuccess(false);
         setInitialCloudLoadComplete(false);
       } finally {
@@ -432,7 +411,7 @@ const App: React.FC = () => {
     fetchCloudData();
   }, [user, authLoading]);
 
-  // Sync state TO Firestore whenever local data changes (except during initial load)
+  // Sync state TO Supabase whenever local data changes (except during initial load)
   useEffect(() => {
     if (!user || !initialCloudLoadComplete || !cloudLoadSuccess) return;
 
@@ -457,11 +436,7 @@ const App: React.FC = () => {
     const timer = setTimeout(async () => {
       setIsSyncing(true);
       try {
-        const { doc, setDoc } = await import("firebase/firestore");
-        const { db } = await import("./firebase");
-        const docRef = doc(db, "settings", user.uid);
-        await setDoc(docRef, sanitizeForFirestore({
-          userId: user.uid,
+        const updatedAt = await upsertUserSettings(user.uid, {
           students,
           ranksMale,
           ranksFemale,
@@ -470,11 +445,10 @@ const App: React.FC = () => {
           negSoundUrl,
           timerSoundUrl,
           customLudoTiles,
-          updatedAt: Date.now()
-        }), { merge: true });
+        });
 
         lastSyncedSnapshotRef.current = currentSnapshot;
-        setLastSyncedTime(Date.now());
+        setLastSyncedTime(updatedAt);
       } catch (err) {
         console.error("Auto-sync to cloud failed:", err);
       } finally {
@@ -1022,14 +996,10 @@ const App: React.FC = () => {
           setTimerSoundUrl(data.timerSoundUrl);
         }
 
-        // Trigger immediate sync to Firestore if user is authenticated
+        // Trigger immediate sync to Supabase if user is authenticated
         if (user) {
           setIsSyncing(true);
-          import("firebase/firestore").then(async ({ doc, setDoc }) => {
-            const { db } = await import("./firebase");
-            const docRef = doc(db, "settings", user.uid);
-            await setDoc(docRef, sanitizeForFirestore({
-              userId: user.uid,
+          upsertUserSettings(user.uid, {
               students: data.students || [],
               ranksMale: data.ranksMale || [],
               ranksFemale: data.ranksFemale || [],
@@ -1037,9 +1007,9 @@ const App: React.FC = () => {
               posSoundUrl: data.posSoundUrl || "",
               negSoundUrl: data.negSoundUrl || "",
               timerSoundUrl: data.timerSoundUrl || "",
-              updatedAt: Date.now()
-            }), { merge: true });
-            setLastSyncedTime(Date.now());
+              customLudoTiles: data.customLudoTiles || customLudoTiles
+          }).then((updatedAt) => {
+            setLastSyncedTime(updatedAt);
             setIsSyncing(false);
           }).catch((err) => {
             console.error("Cloud sync during import failed:", err);
@@ -1064,11 +1034,7 @@ const App: React.FC = () => {
     }
     setIsSyncing(true);
     try {
-      const { doc, setDoc } = await import("firebase/firestore");
-      const { db } = await import("./firebase");
-      const docRef = doc(db, "settings", user.uid);
-      await setDoc(docRef, sanitizeForFirestore({
-        userId: user.uid,
+      const updatedAt = await upsertUserSettings(user.uid, {
         students,
         ranksMale,
         ranksFemale,
@@ -1076,11 +1042,11 @@ const App: React.FC = () => {
         posSoundUrl,
         negSoundUrl,
         timerSoundUrl,
-        updatedAt: Date.now()
-      }), { merge: true });
-      setLastSyncedTime(Date.now());
+        customLudoTiles
+      });
+      setLastSyncedTime(updatedAt);
       if (!silent) {
-        alert("Khánh chúc! Toàn bộ cơ sở dữ liệu học lục, sỹ tử và thiên sủng triều đình đã được SAO LƯU lên Đám mây (Firestore) thành công! ⚜️☁️✨");
+        alert("Khánh chúc! Toàn bộ cơ sở dữ liệu học lục, sỹ tử và thiên sủng triều đình đã được SAO LƯU lên Đám mây (Supabase) thành công! ⚜️☁️✨");
       }
     } catch (err) {
       console.error("Backup to Cloud failed:", err);
@@ -1102,13 +1068,9 @@ const App: React.FC = () => {
     }
     setIsSyncing(true);
     try {
-      const { doc, getDoc } = await import("firebase/firestore");
-      const { db } = await import("./firebase");
-      const docRef = doc(db, "settings", user.uid);
-      const docSnap = await getDoc(docRef);
+      const cloudData = await fetchUserSettings(user.uid);
 
-      if (docSnap.exists()) {
-        const cloudData = docSnap.data();
+      if (cloudData) {
         if (cloudData.students && Array.isArray(cloudData.students)) {
           setStudents(cloudData.students);
         }
@@ -1129,6 +1091,10 @@ const App: React.FC = () => {
         }
         if (cloudData.timerSoundUrl) {
           setTimerSoundUrl(cloudData.timerSoundUrl);
+        }
+        if (cloudData.customLudoTiles && typeof cloudData.customLudoTiles === 'object') {
+          setCustomLudoTiles(cloudData.customLudoTiles);
+          localStorage.setItem('custom_ludo_tiles', JSON.stringify(cloudData.customLudoTiles));
         }
         setLastSyncedTime(cloudData.updatedAt || Date.now());
         alert("Khánh chúc! Đã PHỤC HỒI dữ liệu từ đám mây thành công tốt đẹp! Toàn bộ sỹ tử và tiên thú đã hội quân. ⚜️☁️✨");

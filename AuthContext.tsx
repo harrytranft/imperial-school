@@ -1,16 +1,15 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { 
-  User, 
-  onAuthStateChanged, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  signInWithPopup, 
-  signOut, 
-  updateProfile 
-} from "firebase/auth";
-import { auth, googleProvider } from "./firebase";
-import { doc, setDoc, onSnapshot } from "firebase/firestore";
-import { db } from "./firebase";
+import { User as SupabaseUser } from "@supabase/supabase-js";
+import { isSupabaseConfigured, supabase } from "./supabaseClient";
+
+const FALLBACK_DISPLAY_NAME = "Học sĩ triều đình";
+const FALLBACK_AVATAR = "https://api.dicebear.com/7.x/bottts/svg";
+
+export interface AuthUser {
+  uid: string;
+  id: string;
+  email?: string;
+}
 
 interface UserProfile {
   displayName: string;
@@ -18,12 +17,16 @@ interface UserProfile {
   email?: string;
 }
 
+interface SignUpResult {
+  needsEmailConfirmation: boolean;
+}
+
 interface AuthContextType {
-  user: User | null;
+  user: AuthUser | null;
   profile: UserProfile | null;
   loading: boolean;
   loginWithEmail: (email: string, pass: string) => Promise<void>;
-  signUpWithEmail: (email: string, pass: string, displayName: string) => Promise<void>;
+  signUpWithEmail: (email: string, pass: string, displayName: string) => Promise<SignUpResult>;
   signInWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   updateUserProfile: (displayName: string, photoURL: string) => Promise<void>;
@@ -31,173 +34,208 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const getMetadataProfile = (usr: SupabaseUser): UserProfile => ({
+  displayName: usr.user_metadata?.display_name || usr.user_metadata?.full_name || FALLBACK_DISPLAY_NAME,
+  photoURL: usr.user_metadata?.photo_url || usr.user_metadata?.avatar_url || FALLBACK_AVATAR,
+  email: usr.email || ""
+});
+
+const toAuthUser = (usr: SupabaseUser): AuthUser => ({
+  uid: usr.id,
+  id: usr.id,
+  email: usr.email || ""
+});
+
+const normalizeAuthError = (message?: string) => {
+  const raw = message || "";
+  const lower = raw.toLowerCase();
+  if (lower.includes("invalid login credentials")) return "Email hoặc mật khẩu không chính xác.";
+  if (lower.includes("email not confirmed")) return "Email chưa được xác nhận. Vui lòng mở email Supabase đã gửi và bấm link xác nhận.";
+  if (lower.includes("already registered") || lower.includes("already exists")) return "Địa chỉ Email này đã được sử dụng.";
+  if (lower.includes("password")) return "Mật khẩu không hợp lệ hoặc quá yếu (cần tối thiểu 6 ký tự).";
+  if (lower.includes("email")) return "Địa chỉ Email không hợp lệ.";
+  return raw || "Có lỗi xảy ra khi xác thực.";
+};
+
+const ensureProfile = async (usr: SupabaseUser): Promise<UserProfile> => {
+  const fallback = getMetadataProfile(usr);
+  const now = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .upsert({
+      user_id: usr.id,
+      email: usr.email || "",
+      display_name: fallback.displayName,
+      photo_url: fallback.photoURL,
+      last_login_at: now,
+      updated_at: now
+    }, { onConflict: "user_id" })
+    .select("email, display_name, photo_url")
+    .single();
+
+  if (error) {
+    console.error("Error syncing Supabase profile:", error);
+    return fallback;
+  }
+
+  return {
+    displayName: data.display_name || fallback.displayName,
+    photoURL: data.photo_url || fallback.photoURL,
+    email: data.email || fallback.email
+  };
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let unsubscribeProfile: (() => void) | null = null;
+    let isMounted = true;
 
-    const unsubscribeAuth = onAuthStateChanged(auth, async (usr) => {
+    const syncSessionUser = async (usr: SupabaseUser | null) => {
+      if (!isMounted) return;
       setLoading(true);
-      if (usr) {
-        setUser(usr);
-        // Default minimal profile fallback
-        setProfile({
-          displayName: usr.displayName || "Học sĩ triều đình",
-          photoURL: usr.photoURL || "https://api.dicebear.com/7.x/bottts/svg",
-          email: usr.email || ""
-        });
 
-        // Sync and subscription to firestore user profile
-        const userDocRef = doc(db, "users", usr.uid);
-        try {
-          // Attempt simple setDoc to ensure the document exists
-          await setDoc(userDocRef, {
-            uid: usr.uid,
-            email: usr.email || "",
-            displayName: usr.displayName || "Học sĩ triều đình",
-            photoURL: usr.photoURL || "https://api.dicebear.com/7.x/bottts/svg",
-            lastLogin: Date.now()
-          }, { merge: true });
-        } catch (error) {
-          console.error("Error setting/merging initial user profile in Firestore:", error);
-        }
-
-        // Subscribe to real-time updates for User Profile to sync nicely
-        unsubscribeProfile = onSnapshot(userDocRef, (snap) => {
-          if (snap.exists()) {
-            const data = snap.data();
-            setProfile({
-              displayName: data.displayName || usr.displayName || "Học sĩ triều đình",
-              photoURL: data.photoURL || usr.photoURL || "https://api.dicebear.com/7.x/bottts/svg",
-              email: data.email || usr.email || ""
-            });
-          }
-          setLoading(false);
-        }, (error) => {
-          console.error("Error listening to user profile:", error);
-          setLoading(false);
-        });
-
-      } else {
+      if (!usr) {
         setUser(null);
         setProfile(null);
-        if (unsubscribeProfile) {
-          unsubscribeProfile();
-          unsubscribeProfile = null;
-        }
         setLoading(false);
+        return;
       }
+
+      setUser(toAuthUser(usr));
+      setProfile(getMetadataProfile(usr));
+
+      const syncedProfile = await ensureProfile(usr);
+      if (!isMounted) return;
+      setProfile(syncedProfile);
+      setLoading(false);
+    };
+
+    supabase.auth.getSession()
+      .then(({ data }) => syncSessionUser(data.session?.user || null))
+      .catch((error) => {
+        console.error("Error reading Supabase session:", error);
+        if (isMounted) setLoading(false);
+      });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      syncSessionUser(session?.user || null);
     });
 
     return () => {
-      unsubscribeAuth();
-      if (unsubscribeProfile) {
-        unsubscribeProfile();
-      }
+      isMounted = false;
+      listener.subscription.unsubscribe();
     };
   }, []);
 
-  const loginWithEmail = async (email: string, pass: string) => {
-    try {
-      await signInWithEmailAndPassword(auth, email, pass);
-    } catch (err: any) {
-      console.error("Email login failure:", err);
-      let msg = "Đăng nhập thất bại.";
-      if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
-        msg = "Email hoặc mật khẩu không chính xác.";
-      } else if (err.code === "auth/invalid-email") {
-        msg = "Địa chỉ Email không hợp lệ.";
-      } else if (err.message) {
-        msg = err.message;
-      }
-      throw new Error(msg);
+  const assertConfigured = () => {
+    if (!isSupabaseConfigured) {
+      throw new Error("Thiếu VITE_SUPABASE_URL hoặc VITE_SUPABASE_ANON_KEY. Vui lòng kiểm tra Environment Variables trên Vercel.");
     }
   };
 
-  const signUpWithEmail = async (email: string, pass: string, displayName: string) => {
-    try {
-      const res = await createUserWithEmailAndPassword(auth, email, pass);
-      const defaultAvatar = "https://api.dicebear.com/7.x/adventurer/svg?seed=" + encodeURIComponent(displayName || "Sỹ Phu");
-      if (res.user) {
-        await updateProfile(res.user, {
-          displayName: displayName || "Học sĩ triều đình",
-          photoURL: defaultAvatar
-        });
-        const userDocRef = doc(db, "users", res.user.uid);
-        await setDoc(userDocRef, {
-          uid: res.user.uid,
-          email: email,
-          displayName: displayName || "Học sĩ triều đình",
-          photoURL: defaultAvatar,
-          createdAt: Date.now(),
-          lastLogin: Date.now()
-        }, { merge: true });
-      }
-    } catch (err: any) {
-      console.error("Email sign up failure:", err);
-      let msg = "Đăng ký thất bại.";
-      if (err.code === "auth/email-already-in-use") {
-        msg = "Địa chỉ Email này đã được sử dụng.";
-      } else if (err.code === "auth/weak-password") {
-        msg = "Mật khẩu quá yếu (cần tối thiểu 6 ký tự).";
-      } else if (err.code === "auth/invalid-email") {
-        msg = "Địa chỉ Email không hợp lệ.";
-      } else if (err.message) {
-        msg = err.message;
-      }
-      throw new Error(msg);
+  const loginWithEmail = async (email: string, pass: string) => {
+    assertConfigured();
+    const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
+    if (error) {
+      console.error("Supabase email login failure:", error);
+      throw new Error(normalizeAuthError(error.message));
     }
+  };
+
+  const signUpWithEmail = async (email: string, pass: string, displayName: string): Promise<SignUpResult> => {
+    assertConfigured();
+    const defaultAvatar = "https://api.dicebear.com/7.x/adventurer/svg?seed=" + encodeURIComponent(displayName || "Sỹ Phu");
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password: pass,
+      options: {
+        data: {
+          display_name: displayName || FALLBACK_DISPLAY_NAME,
+          photo_url: defaultAvatar
+        }
+      }
+    });
+
+    if (error) {
+      console.error("Supabase email sign up failure:", error);
+      throw new Error(normalizeAuthError(error.message));
+    }
+
+    if (data.user && data.session) {
+      await ensureProfile(data.user);
+    }
+
+    return { needsEmailConfirmation: !data.session };
   };
 
   const signInWithGoogle = async () => {
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (err) {
-      console.error("Google sign in failure:", err);
-      alert("Đăng nhập Google thất bại: Nếu bạn đang chạy ứng dụng trong iFrame, hãy sử dụng Đăng nhập bằng Email & Mật khẩu!");
-      throw err;
+    assertConfigured();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin
+      }
+    });
+
+    if (error) {
+      console.error("Supabase Google sign in failure:", error);
+      alert("Đăng nhập Google thất bại. Vui lòng kiểm tra Google Provider và Redirect URLs trong Supabase Auth.");
+      throw error;
     }
   };
 
   const logout = async () => {
-    await signOut(auth);
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
   };
 
   const updateUserProfile = async (displayName: string, photoURL: string) => {
-    if (!auth.currentUser) return;
-    try {
-      // 1. Update Firebase auth details (best effort)
-      await updateProfile(auth.currentUser, { displayName, photoURL });
-      
-      // 2. Update Firestore document (master source of truth for synced accounts)
-      const userDocRef = doc(db, "users", auth.currentUser.uid);
-      await setDoc(userDocRef, {
-        displayName,
-        photoURL,
-        updatedAt: Date.now()
-      }, { merge: true });
-      
-      // 3. Update local state just in case snapshot takes another cycle
-      setProfile((prev) => prev ? { ...prev, displayName, photoURL } : { displayName, photoURL });
-    } catch (err) {
-      console.error("Failed to update user profile:", err);
-      throw err;
+    const { data, error } = await supabase.auth.updateUser({
+      data: {
+        display_name: displayName,
+        photo_url: photoURL
+      }
+    });
+
+    if (error) {
+      console.error("Failed to update Supabase auth profile:", error);
+      throw error;
     }
+
+    if (!data.user) return;
+
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .upsert({
+        user_id: data.user.id,
+        email: data.user.email || "",
+        display_name: displayName,
+        photo_url: photoURL,
+        updated_at: new Date().toISOString()
+      }, { onConflict: "user_id" });
+
+    if (profileError) {
+      console.error("Failed to update Supabase profile row:", profileError);
+      throw profileError;
+    }
+
+    setProfile((prev) => prev ? { ...prev, displayName, photoURL } : { displayName, photoURL });
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      profile, 
-      loading, 
-      loginWithEmail, 
-      signUpWithEmail, 
-      signInWithGoogle, 
-      logout, 
-      updateUserProfile 
+    <AuthContext.Provider value={{
+      user,
+      profile,
+      loading,
+      loginWithEmail,
+      signUpWithEmail,
+      signInWithGoogle,
+      logout,
+      updateUserProfile
     }}>
       {children}
     </AuthContext.Provider>
@@ -209,4 +247,3 @@ export const useAuth = () => {
   if (!context) throw new Error("useAuth must be used inside AuthProvider");
   return context;
 };
-

@@ -1,0 +1,81 @@
+import { supabase } from './supabaseClient';
+import { RankInfo, Skill, Student, LudoTileSpec } from './types';
+
+export interface UserSettingsData {
+  students: Student[];
+  ranksMale: RankInfo[];
+  ranksFemale: RankInfo[];
+  skills: Skill[];
+  posSoundUrl: string;
+  negSoundUrl: string;
+  timerSoundUrl: string;
+  customLudoTiles?: Record<number, LudoTileSpec>;
+  updatedAt?: number;
+}
+
+export const sanitizeForSupabase = (val: any): any => {
+  if (val === undefined) return null;
+  if (val === null) return null;
+  if (Array.isArray(val)) {
+    return val.map(sanitizeForSupabase);
+  }
+  if (typeof val === 'object') {
+    if (val instanceof Date) return val.toISOString();
+    const clean: any = {};
+    for (const key in val) {
+      if (Object.prototype.hasOwnProperty.call(val, key)) {
+        const v = val[key];
+        if (v !== undefined) {
+          clean[key] = sanitizeForSupabase(v);
+        }
+      }
+    }
+    return clean;
+  }
+  return val;
+};
+
+export const fetchUserSettings = async (userId: string): Promise<UserSettingsData | null> => {
+  const { data, error } = await supabase
+    .from('user_settings')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  return {
+    students: Array.isArray(data.students) ? data.students : [],
+    ranksMale: Array.isArray(data.ranks_male) ? data.ranks_male : [],
+    ranksFemale: Array.isArray(data.ranks_female) ? data.ranks_female : [],
+    skills: Array.isArray(data.skills) ? data.skills : [],
+    posSoundUrl: data.pos_sound_url || '',
+    negSoundUrl: data.neg_sound_url || '',
+    timerSoundUrl: data.timer_sound_url || '',
+    customLudoTiles: data.custom_ludo_tiles || {},
+    updatedAt: data.updated_at_ms || undefined
+  };
+};
+
+export const upsertUserSettings = async (userId: string, settings: UserSettingsData): Promise<number> => {
+  const updatedAt = Date.now();
+  const { error } = await supabase
+    .from('user_settings')
+    .upsert({
+      user_id: userId,
+      students: sanitizeForSupabase(settings.students || []),
+      ranks_male: sanitizeForSupabase(settings.ranksMale || []),
+      ranks_female: sanitizeForSupabase(settings.ranksFemale || []),
+      skills: sanitizeForSupabase(settings.skills || []),
+      pos_sound_url: settings.posSoundUrl || '',
+      neg_sound_url: settings.negSoundUrl || '',
+      timer_sound_url: settings.timerSoundUrl || '',
+      custom_ludo_tiles: sanitizeForSupabase(settings.customLudoTiles || {}),
+      updated_at_ms: updatedAt,
+      updated_at: new Date(updatedAt).toISOString()
+    }, { onConflict: 'user_id' });
+
+  if (error) throw error;
+  return updatedAt;
+};
