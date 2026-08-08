@@ -10,7 +10,7 @@ import {
 import { StudentCard } from './components/StudentCard';
 import { LiquidDock } from './components/LiquidDock';
 import { generateEdict } from './geminiService';
-import { LIST_POKEMONS, LIST_ACCESSORIES, LIST_PET_SKILLS as DEFAULT_PET_SKILLS, PetSkill, getRandomPokemon, getEvolvedForm } from './pokemonData';
+import { LIST_POKEMONS, LIST_PET_SKILLS as DEFAULT_PET_SKILLS, PetSkill, getRandomPokemon, getEvolvedForm } from './pokemonData';
 import { useAuth } from './AuthContext';
 import { fetchUserSettings, upsertUserSettings } from './supabaseData';
 
@@ -225,7 +225,6 @@ const App: React.FC = () => {
     }
     return DEFAULT_PET_SKILLS;
   });
-  const [currentTime, setCurrentTime] = useState(new Date());
   
   const [currentScreen, setCurrentScreen] = useState<Screen>('school');
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
@@ -304,7 +303,6 @@ const App: React.FC = () => {
   const [editingTileIndex, setEditingTileIndex] = useState<number | null>(null);
 
   // Pokemon Fusion State
-  const [showFusionModal, setShowFusionModal] = useState(false);
   const [selectedFusionPetDexIds, setSelectedFusionPetDexIds] = useState<number[]>([]);
 
   const [showGroupModal, setShowGroupModal] = useState(false);
@@ -319,7 +317,7 @@ const App: React.FC = () => {
   // Edict handling
   const [edict, setEdict] = useState<string | null>(null);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
-  const [profileTab, setProfileTab] = useState<'info' | 'pet'>('info');
+  const [profileTab, setProfileTab] = useState<'info' | 'pet' | 'fusion'>('info');
 
   // Hatching State variables
   const [showHatchModal, setShowHatchModal] = useState(false);
@@ -364,11 +362,6 @@ const App: React.FC = () => {
       setConfirmLogout(false);
     }
   }, [profile, showUserModal]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   // Sync state FROM Supabase on login (high priority)
   useEffect(() => {
@@ -705,19 +698,6 @@ const App: React.FC = () => {
     }
   }, [activeLudoClassName, ludoActiveStudent]);
 
-  const formattedClockTime = currentTime.toLocaleTimeString('vi-VN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  });
-  const clockWeekday = currentTime.getDay() === 0 ? 'Chủ Nhật' : `Thứ ${currentTime.getDay() + 1}`;
-  const formattedClockDate = `${clockWeekday}, ${currentTime.toLocaleDateString('vi-VN', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric'
-  })}`;
-
   // Actions
   const openLudoForClass = (className?: string, activeStudent?: Student | null) => {
     const nextClass = className || (filterClass !== 'Tất cả' ? filterClass : classOptions[0] || '');
@@ -838,48 +818,6 @@ const App: React.FC = () => {
     setManualPoints('');
     setSelectedStudentIds([]);
     setIsMultiSelectMode(false);
-  };
-
-  const handleBuyAccessory = (studentId: string, accId: string, cost: number, accName: string) => {
-    const student = students.find(s => s.id === studentId);
-    if (!student) return;
-    if (student.points < cost) {
-      alert(`Không đủ Hào quang! Học sĩ cần thêm ${cost - student.points} điểm để mua ${accName}.`);
-      return;
-    }
-
-    if (!window.confirm(`Bạn có đồng ý tiêu hao ${cost} điểm Hào quang để sắm ${accName} cho Pet?`)) return;
-
-    const newPoints = student.points - cost;
-    const historyItem: HistoryItem = {
-      id: Date.now().toString(),
-      amount: -cost,
-      reason: `Trang bị Pet cưng: ${accName}`,
-      timestamp: Date.now()
-    };
-
-    const updatedStudents = students.map(s => {
-      if (s.id === studentId && s.pet) {
-        const updatedPet = {
-          ...s.pet,
-          accessories: [...(s.pet.accessories || []), accId]
-        };
-        const updatedS = {
-          ...s,
-          points: newPoints,
-          pet: updatedPet,
-          history: [historyItem, ...s.history].slice(0, 50)
-        };
-        // Update editingStudent too!
-        setEditingStudent(updatedS);
-        return updatedS;
-      }
-      return s;
-    });
-
-    setStudents(updatedStudents);
-    new Audio(posSoundUrl).play().catch(() => {});
-    alert(`Đã trang bị thành công ${accName}! Khấu trừ ${cost} điểm.`);
   };
 
   const handleBuySkill = (studentId: string, skillId: string, cost: number, skillName: string) => {
@@ -1479,10 +1417,19 @@ const App: React.FC = () => {
     setStudents(updated);
   };
 
+  const getFusionCandidates = (student: Student): PokemonPet[] => {
+    const candidates = [...(student.pets || [])];
+    if (student.pet && !candidates.some(p => p.dexId === student.pet?.dexId && p.name === student.pet?.name)) {
+      candidates.unshift(student.pet);
+    }
+    return candidates;
+  };
+
   // Pokemon Fusion Handler
   const handleFuseSelectedPokemons = (studentId: string) => {
     const s = students.find(x => x.id === studentId);
-    if (!s || !s.pets || s.pets.length < 2) {
+    const fusionCandidates = s ? getFusionCandidates(s) : [];
+    if (!s || fusionCandidates.length < 2) {
       alert("Cần tối thiểu 2 Pokémon để thực hiện hợp nhất!");
       return;
     }
@@ -1492,10 +1439,29 @@ const App: React.FC = () => {
       return;
     }
 
-    const petsToFuse = s.pets.filter(p => selectedFusionPetDexIds.includes(p.dexId));
-    const remainingPets = s.pets.filter(p => !selectedFusionPetDexIds.includes(p.dexId));
+    const petsToFuse = selectedFusionPetDexIds
+      .map(index => fusionCandidates[index])
+      .filter(Boolean);
 
-    const combinedSkills = Array.from(new Set(petsToFuse.flatMap(p => p.skills || [])));
+    if (petsToFuse.length !== 2) {
+      alert("Vui lòng chọn đúng 2 Pokémon hợp lệ để hợp nhất!");
+      return;
+    }
+
+    const selectedSet = new Set(selectedFusionPetDexIds);
+    const remainingPets = fusionCandidates.filter((_, index) => !selectedSet.has(index));
+
+    const combinedSkillUses: Record<string, number> = {};
+    petsToFuse.forEach(pet => {
+      (pet.skills || []).forEach(skillId => {
+        const uses = pet.skillUses?.[skillId] || 0;
+        if (uses >= 2) return;
+        if (combinedSkillUses[skillId] === undefined || uses < combinedSkillUses[skillId]) {
+          combinedSkillUses[skillId] = uses;
+        }
+      });
+    });
+    const combinedSkills = Object.keys(combinedSkillUses);
     const randomNewPokemon = getRandomPokemon();
 
     const fusedPet: PokemonPet = {
@@ -1504,7 +1470,8 @@ const App: React.FC = () => {
       types: Array.from(new Set(petsToFuse.flatMap(p => p.types))),
       accessories: [],
       skills: combinedSkills,
-      skillUses: {}
+      skillUses: combinedSkillUses,
+      baseDexId: randomNewPokemon.dexId
     };
 
     const updatedPets = [fusedPet, ...remainingPets];
@@ -1518,7 +1485,7 @@ const App: React.FC = () => {
     setStudents(prev => prev.map(x => x.id === studentId ? updatedS : x));
     setEditingStudent(updatedS);
     setSelectedFusionPetDexIds([]);
-    setShowFusionModal(false);
+    setProfileTab('pet');
     new Audio(posSoundUrl).play().catch(() => {});
     alert(`🔮 HỢP NHẤT THÀNH CÔNG!\n\nĐã dung hợp các Pokémon để tái sinh linh thú [${fusedPet.name}] tích tụ ${combinedSkills.length} tuyệt chiêu thần bí!`);
   };
@@ -1997,21 +1964,9 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_50%_0%,#fffbf2_0%,#f5ebe0_100%)] pb-32">
-      {/* CLOCK + AUTO-HIDE NAVIGATION BAR */}
-      <div className="sticky top-0 z-40 group/topbar">
-        <div className="min-h-[96px] sm:min-h-[110px] flex flex-col items-center justify-center bg-gradient-to-b from-red-950 via-red-900 to-amber-950 text-amber-100 border-b-2 border-amber-400/50 shadow-[0_10px_30px_rgba(0,0,0,0.25)]">
-          <div className="text-center select-none leading-none">
-            <div className="font-mono text-5xl sm:text-7xl font-black text-amber-200 tabular-nums drop-shadow-[0_3px_0_rgba(0,0,0,0.35)]">
-              {formattedClockTime}
-            </div>
-            <div className="mt-3 text-sm sm:text-lg font-black uppercase text-amber-300">
-              {formattedClockDate}
-            </div>
-          </div>
-        </div>
-
-        <nav className="absolute inset-x-0 top-0 p-3 sm:p-4 backdrop-blur-xl bg-gradient-to-r from-red-950/98 via-red-900/98 to-amber-950/98 border-b-2 border-amber-400/50 shadow-[0_10px_30px_rgba(0,0,0,0.3)] -translate-y-full opacity-0 pointer-events-none group-hover/topbar:translate-y-0 group-hover/topbar:opacity-100 group-hover/topbar:pointer-events-auto focus-within:translate-y-0 focus-within:opacity-100 focus-within:pointer-events-auto transition-all duration-300">
-          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
+      {/* NAVIGATION BAR */}
+      <nav className="sticky top-0 z-40 p-3 sm:p-4 backdrop-blur-xl bg-gradient-to-r from-red-950/95 via-red-900/95 to-amber-950/95 border-b-2 border-amber-400/50 shadow-[0_10px_30px_rgba(0,0,0,0.3)]">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
           
           {/* Left: Brand */}
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setCurrentScreen('school')}>
@@ -2120,9 +2075,8 @@ const App: React.FC = () => {
             </button>
           </div>
 
-          </div>
-        </nav>
-      </div>
+        </div>
+      </nav>
 
       {/* MAIN CONTENT */}
       <main className="max-w-7xl mx-auto p-6">
@@ -2265,6 +2219,16 @@ const App: React.FC = () => {
                 <span>{editingStudent.pet ? '🔥' : '🥚'}</span>
                 <span>{editingStudent.pet ? 'LINH THÚ HỘ MỆNH' : 'ẤP TRỨNG POKÉMON'}</span>
               </button>
+              <button 
+                onClick={() => {
+                  setProfileTab('fusion');
+                  setSelectedFusionPetDexIds([]);
+                }} 
+                className={`flex-1 py-3 text-xs sm:text-sm font-black border-b-4 transition-all tracking-wider flex items-center justify-center gap-2 ${profileTab === 'fusion' ? 'text-purple-700 border-purple-700' : 'text-gray-400 border-transparent hover:text-gray-600'}`}
+              >
+                <span>🔮</span>
+                <span>HỢP NHẤT LINH THÚ</span>
+              </button>
             </div>
 
             {profileTab === 'info' ? (
@@ -2346,7 +2310,7 @@ const App: React.FC = () => {
                   </div>
                 </div>
               </div>
-            ) : (
+            ) : profileTab === 'pet' ? (
               <div className="space-y-10 animate-in fade-in duration-300">
                 {!editingStudent.pet ? (
                   /* EGG SCREEN WITH OWNED PETS SELECTION */
@@ -2549,36 +2513,14 @@ const App: React.FC = () => {
                           />
                         </div>
 
-                        {/* Equipped Items Summary */}
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-1">
-                          <div>
-                            <p className="text-[10px] uppercase font-bold text-gray-400 block mb-1.5">Phụ Kiện Đang Mặt Sức ({editingStudent.pet.accessories.length})</p>
-                            <div className="flex flex-wrap gap-1.5 font-sans">
-                              {editingStudent.pet.accessories.map(accId => {
-                                const acc = LIST_ACCESSORIES.find(a => a.id === accId);
-                                return (
-                                  <span key={accId} className="bg-amber-100 text-amber-950 text-[10px] font-black px-2.5 py-1 rounded-full border border-amber-200/50 flex items-center gap-1">
-                                    <span>{acc?.icon || '👕'}</span>
-                                    <span>{acc?.name}</span>
-                                  </span>
-                                );
-                              })}
-                              {editingStudent.pet.accessories.length === 0 && (
-                                <span className="text-xs text-gray-400 italic">Pet đang mộc mạc thanh thuần...</span>
-                              )}
-                            </div>
-                          </div>
-                          
-                          {/* Buy New Egg Link */}
-                          <div className="shrink-0 pt-2 sm:pt-0">
-                            <button 
-                              onClick={() => handleBuyNewEgg(editingStudent.id)}
-                              className="bg-red-800 hover:bg-red-950 text-white font-bold text-xs p-3 px-5 rounded-2xl flex items-center gap-2 shadow-md transition-all active:translate-y-px font-sans"
-                            >
-                              <span>🥚🌟</span>
-                              <span>Thỉnh Trứng Pokémon Mới (10đ)</span>
-                            </button>
-                          </div>
+                        <div className="flex justify-end pt-1">
+                          <button 
+                            onClick={() => handleBuyNewEgg(editingStudent.id)}
+                            className="bg-red-800 hover:bg-red-950 text-white font-bold text-xs p-3 px-5 rounded-2xl flex items-center gap-2 shadow-md transition-all active:translate-y-px font-sans"
+                          >
+                            <span>🥚🌟</span>
+                            <span>Thỉnh Trứng Pokémon Mới (10đ)</span>
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -2623,19 +2565,6 @@ const App: React.FC = () => {
                           })}
                         </div>
 
-                        {editingStudent.pets.length >= 2 && (
-                          <div className="pt-2 border-t border-amber-200/40 text-center font-sans">
-                            <button
-                              onClick={() => {
-                                setSelectedFusionPetDexIds([]);
-                                setShowFusionModal(true);
-                              }}
-                              className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black text-xs py-3 rounded-2xl shadow-md uppercase tracking-wider transition-all"
-                            >
-                              🔮 Hợp Nhất Pokémon (Fusion 2 Thú Cưng)
-                            </button>
-                          </div>
-                        )}
                       </div>
                     )}
 
@@ -2677,45 +2606,6 @@ const App: React.FC = () => {
                         </div>
                       </div>
                     )}
-
-                    {/* SECTION: ACCESSORIES STORE */}
-                    <div className="space-y-4">
-                      <h4 className="font-royal text-xl text-amber-900 border-b pb-2 flex items-center gap-2">
-                        <span>🧥</span>
-                        <span>Cửa Hàng Phụ Kiện Cung Đình</span>
-                      </h4>
-                      <p className="text-xs text-amber-900/70 font-sans">Tiêu hao Hào Quang của học sĩ mua phụ kiện trang hoàng lộng lẫy cho linh thú hộ thân!</p>
-                      
-                      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-                        {LIST_ACCESSORIES.map(acc => {
-                          const isOwned = editingStudent.pet?.accessories.includes(acc.id);
-                          return (
-                            <div key={acc.id} className="bg-white p-3 border border-gray-100 rounded-2xl flex flex-col justify-between items-center text-center shadow-sm hover:border-amber-200 hover:bg-amber-50/10 transition-all leading-tight aspect-[4/3] group relative select-none">
-                              <span className="absolute top-2 right-2 text-[10px] bg-amber-50 text-amber-800 font-bold px-1.5 py-0.5 rounded-full shrink-0 font-sans">{acc.cost}đ</span>
-                              <div className="text-3xl mt-1.5">{acc.icon}</div>
-                              <div className="mt-2 min-w-0">
-                                <h5 className="font-bold text-[11px] text-gray-800 truncate">{acc.name}</h5>
-                                <p className="text-[9px] text-gray-400 line-clamp-2 mt-1">{acc.description}</p>
-                              </div>
-                              <div className="w-full mt-3 font-sans">
-                                {isOwned ? (
-                                  <span className="w-full block text-center text-green-700 bg-green-50 font-black text-[9px] py-1.5 rounded-lg border border-green-200 uppercase tracking-tighter">
-                                    ✓ Đã mặc sức
-                                  </span>
-                                ) : (
-                                  <button
-                                    onClick={() => handleBuyAccessory(editingStudent.id, acc.id, acc.cost, acc.name)}
-                                    className="w-full text-center bg-amber-500 hover:bg-amber-600 text-white font-bold text-[9px] py-1.5 rounded-lg uppercase tracking-tight shadow active:translate-y-px transition-all"
-                                  >
-                                    Chiêu mộ ({acc.cost}đ)
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
 
                     {/* SECTION: PET SKILLS DOJO */}
                     <div className="space-y-4 pt-4">
@@ -2759,6 +2649,77 @@ const App: React.FC = () => {
                     </div>
                   </div>
                 )}
+              </div>
+            ) : (
+              <div className="space-y-8 animate-in fade-in duration-300">
+                <div className="bg-purple-50/70 border-2 border-purple-200 rounded-[32px] p-6 space-y-4">
+                  <div className="flex items-center justify-between gap-4 border-b border-purple-200 pb-4">
+                    <div>
+                      <h3 className="text-2xl font-royal text-purple-900 uppercase tracking-wider">🔮 Hợp nhất Linh thú</h3>
+                      <p className="text-xs text-purple-950/70 mt-1">Chọn đúng 2 Pokémon để hợp nhất thành 1 Pokémon mới. Hai Pokémon cũ sẽ biến mất, còn các skills đã mua và vẫn còn hiệu lực sẽ được giữ lại.</p>
+                    </div>
+                    <span className="shrink-0 bg-white text-purple-900 border border-purple-200 px-3 py-1.5 rounded-full text-xs font-black">
+                      Đã chọn {selectedFusionPetDexIds.length}/2
+                    </span>
+                  </div>
+
+                  {getFusionCandidates(editingStudent).length < 2 ? (
+                    <div className="bg-white border border-purple-100 rounded-3xl p-8 text-center space-y-3">
+                      <div className="text-5xl">🥚</div>
+                      <p className="text-sm font-black text-purple-900">Cần tối thiểu 2 Pokémon để hợp nhất.</p>
+                      <p className="text-xs text-purple-700/70">Hãy ấp thêm trứng hoặc chọn lại linh thú sở hữu trước khi dung hợp.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {getFusionCandidates(editingStudent).map((p, index) => {
+                          const isSelected = selectedFusionPetDexIds.includes(index);
+                          const skillNames = (p.skills || [])
+                            .map(skillId => petSkills.find(skill => skill.id === skillId)?.name || skillId)
+                            .slice(0, 3);
+                          return (
+                            <button
+                              type="button"
+                              key={`${p.dexId}-${p.name}-${index}`}
+                              onClick={() => {
+                                if (isSelected) {
+                                  setSelectedFusionPetDexIds(prev => prev.filter(x => x !== index));
+                                  return;
+                                }
+                                if (selectedFusionPetDexIds.length >= 2) {
+                                  alert("Chỉ được chọn tối đa 2 Pokémon để hợp nhất!");
+                                  return;
+                                }
+                                setSelectedFusionPetDexIds(prev => [...prev, index]);
+                              }}
+                              className={`text-left bg-white p-4 rounded-3xl border-2 transition-all flex items-center gap-4 ${isSelected ? 'border-purple-700 ring-4 ring-purple-100 shadow-lg' : 'border-purple-100 hover:border-purple-300'}`}
+                            >
+                              <img src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.dexId}.png`} className="w-16 h-16 object-contain shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-black text-sm text-purple-950 truncate">{p.name}</h4>
+                                  {isSelected && <span className="text-[9px] bg-purple-700 text-white px-2 py-0.5 rounded-full font-black">CHỌN</span>}
+                                </div>
+                                <p className="text-[9px] font-black text-purple-600 uppercase mt-1">{p.types.join(' / ')}</p>
+                                <p className="text-[10px] text-stone-500 mt-2 line-clamp-2">
+                                  {skillNames.length > 0 ? `Skills: ${skillNames.join(', ')}` : 'Chưa có skill đã mua'}
+                                </p>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <button
+                        disabled={selectedFusionPetDexIds.length !== 2}
+                        onClick={() => handleFuseSelectedPokemons(editingStudent.id)}
+                        className="w-full bg-purple-700 hover:bg-purple-800 disabled:opacity-40 disabled:hover:bg-purple-700 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-wider shadow-lg transition-all"
+                      >
+                        🔮 Hợp Nhất 2 Linh Thú Đã Chọn
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -3737,61 +3698,6 @@ const App: React.FC = () => {
             >
               Đã Hiểu & Tiếp Tục 🎲
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: POKEMON FUSION */}
-      {showFusionModal && editingStudent && editingStudent.pets && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
-          <div className="bg-white w-full max-w-lg rounded-[40px] shadow-2xl p-8 border-4 border-purple-600 animate-in zoom-in space-y-6 text-center">
-            <h3 className="text-2xl font-royal text-purple-900 uppercase tracking-wider">🔮 Dung Hợp Hợp Nhất Pokémon</h3>
-            <p className="text-xs text-purple-950/70">Chọn đúng 2 Linh thú muốn dung hợp để hóa sinh 1 Linh thú mới tích tụ trọn vẹn sức mạnh!</p>
-
-            <div className="grid grid-cols-2 gap-3 max-h-60 overflow-y-auto pr-1 custom-scrollbar text-left">
-              {editingStudent.pets.map(p => {
-                const isSelected = selectedFusionPetDexIds.includes(p.dexId);
-                return (
-                  <div 
-                    key={p.dexId} 
-                    onClick={() => {
-                      if (isSelected) {
-                        setSelectedFusionPetDexIds(prev => prev.filter(x => x !== p.dexId));
-                      } else {
-                        if (selectedFusionPetDexIds.length >= 2) {
-                          alert("Chỉ được chọn tối đa 2 Pokémon để dung hợp!");
-                          return;
-                        }
-                        setSelectedFusionPetDexIds(prev => [...prev, p.dexId]);
-                      }
-                    }}
-                    className={`p-3 rounded-2xl border-2 cursor-pointer flex items-center gap-2 transition-all ${isSelected ? 'border-purple-600 bg-purple-50 ring-2 ring-purple-200' : 'border-gray-200 bg-white'}`}
-                  >
-                    <img src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.dexId}.png`} className="w-10 h-10 object-contain" />
-                    <div className="min-w-0">
-                      <h5 className="font-extrabold text-xs text-gray-800 truncate">{p.name}</h5>
-                      <span className="text-[8px] bg-purple-100 text-purple-900 px-1.5 py-0.5 rounded font-bold uppercase">{p.types.join('/')}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button 
-                disabled={selectedFusionPetDexIds.length < 2}
-                onClick={() => handleFuseSelectedPokemons(editingStudent.id)}
-                className="flex-1 bg-purple-700 hover:bg-purple-800 disabled:opacity-40 text-white py-3.5 rounded-2xl font-black text-xs uppercase tracking-wider shadow-lg transition-all"
-              >
-                Tiến Hành Dung Hợp 🔮
-              </button>
-              <button 
-                onClick={() => setShowFusionModal(false)}
-                className="bg-stone-100 text-stone-600 hover:bg-stone-200 px-6 py-3.5 rounded-2xl font-bold text-xs uppercase transition-all"
-              >
-                Hủy
-              </button>
-            </div>
           </div>
         </div>
       )}

@@ -17,9 +17,12 @@
 - Verified production build with `npm run build`.
 - Ran `npm audit fix`; `npm audit` now reports 0 vulnerabilities.
 - Updated Cá Ngựa so each race is scoped to one class only, including board display, player selector, and kick/collision logic.
-- Added the top center live clock/date display and changed the main navbar to auto-hide until hovering the top area.
+- Reverted the top clock/date display and navbar auto-hide after user feedback.
 - Added customizable Pokémon skills in Settings and included them in local storage, JSON backup, and Supabase sync.
 - Added hide/show toggles for Settings sections.
+- Removed the top clock/date display and returned the main navbar to a normal sticky bar.
+- Removed the imperial accessory shop from the student profile; Pokémon progression now focuses on skills only.
+- Added a dedicated `Hợp nhất Linh thú` profile tab for merging exactly 2 Pokémon into a new one while preserving still-active purchased skills.
 
 ## Manual Steps Needed
 

@@ -121,11 +121,6 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
                 className="w-full h-full object-contain"
                 alt={pet.name}
               />
-              {pet.accessories.length > 0 && (
-                <span className="absolute -top-2 -right-2 bg-amber-400 text-white text-[8px] font-black rounded-full w-5 h-5 flex items-center justify-center border border-white">
-                  👕
-                </span>
-              )}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-1.5">
