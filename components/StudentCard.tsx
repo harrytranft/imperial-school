@@ -1,16 +1,17 @@
 
 import React from 'react';
 import { Student, RankInfo, Gender } from '../types';
-import { LIST_PET_SKILLS } from '../pokemonData';
+import { PetSkill } from '../pokemonData';
 
 interface StudentCardProps {
   student: Student;
   getRank: (pts: number, gender: Gender) => RankInfo;
   onSelect: (student: Student) => void;
+  petSkills: PetSkill[];
   isSelected?: boolean;
 }
 
-export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSelect, isSelected }) => {
+export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSelect, petSkills, isSelected }) => {
   const rank = getRank(student.points, student.gender);
   const isAbsent = student.isAbsent;
 
@@ -84,7 +85,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
                     {pet.skills && pet.skills.length > 0 ? (
                       <div className="flex flex-col gap-1 max-h-32 overflow-y-auto">
                         {pet.skills.map(skId => {
-                          const sk = LIST_PET_SKILLS.find(s => s.id === skId);
+                          const sk = petSkills.find(s => s.id === skId);
                           return (
                             <div key={skId} className="bg-amber-900/80 text-amber-100 text-[10px] p-1.5 rounded-lg border border-amber-700/50 flex items-center gap-1.5">
                               <span className="text-sm">{sk?.icon || '✨'}</span>

@@ -16,6 +16,7 @@ create table if not exists public.user_settings (
   ranks_male jsonb not null default '[]'::jsonb,
   ranks_female jsonb not null default '[]'::jsonb,
   skills jsonb not null default '[]'::jsonb,
+  pet_skills jsonb not null default '[]'::jsonb,
   pos_sound_url text not null default '',
   neg_sound_url text not null default '',
   timer_sound_url text not null default '',
@@ -24,6 +25,9 @@ create table if not exists public.user_settings (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.user_settings
+add column if not exists pet_skills jsonb not null default '[]'::jsonb;
 
 alter table public.profiles enable row level security;
 alter table public.user_settings enable row level security;

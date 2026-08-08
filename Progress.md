@@ -16,10 +16,15 @@
 - Removed stale `bun.lock` because Bun is not installed here and the lockfile still referenced Firebase.
 - Verified production build with `npm run build`.
 - Ran `npm audit fix`; `npm audit` now reports 0 vulnerabilities.
+- Updated Cá Ngựa so each race is scoped to one class only, including board display, player selector, and kick/collision logic.
+- Added the top center live clock/date display and changed the main navbar to auto-hide until hovering the top area.
+- Added customizable Pokémon skills in Settings and included them in local storage, JSON backup, and Supabase sync.
+- Added hide/show toggles for Settings sections.
 
 ## Manual Steps Needed
 
 1. In Supabase, open SQL Editor and run the full contents of `supabase-schema.sql`.
+   - If you already ran the older schema, run it again so `user_settings.pet_skills` is added.
 2. In Supabase Auth, make sure Email login is enabled.
 3. If users cannot log in right after signing up, either confirm their email from the Supabase email, or disable required email confirmation for development/testing.
 4. In Supabase Auth URL settings, add your deployed Vercel domain as an allowed site/redirect URL. Add `http://localhost:3000` too if you test locally.

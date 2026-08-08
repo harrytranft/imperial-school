@@ -5,6 +5,7 @@ export const STORAGE_KEY = 'imperial_school_data_v6';
 export const RANKS_KEY_MALE = 'imperial_ranks_male_v6';
 export const RANKS_KEY_FEMALE = 'imperial_ranks_female_v6';
 export const SKILLS_KEY = 'imperial_skills_v6';
+export const PET_SKILLS_KEY = 'imperial_pet_skills_v1';
 
 export const DEFAULT_RANKS_MALE: RankInfo[] = [
   { id: 'm1', level: -1, title: 'Nô tài', minPoints: -999, maxPoints: -1, color: 'text-gray-500', avatar: '' },

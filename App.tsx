@@ -5,12 +5,12 @@ import { Student, Gender, HistoryItem, RankInfo, Skill, PokemonPet, LudoTileSpec
 import { 
   STORAGE_KEY, DEFAULT_RANKS_MALE, DEFAULT_RANKS_FEMALE, 
   RANKS_KEY_MALE, RANKS_KEY_FEMALE, DEFAULT_SKILLS, SKILLS_KEY,
-  DEFAULT_LUDO_TILES
+  DEFAULT_LUDO_TILES, PET_SKILLS_KEY
 } from './constants';
 import { StudentCard } from './components/StudentCard';
 import { LiquidDock } from './components/LiquidDock';
 import { generateEdict } from './geminiService';
-import { LIST_POKEMONS, LIST_ACCESSORIES, LIST_PET_SKILLS, getRandomPokemon, getEvolvedForm } from './pokemonData';
+import { LIST_POKEMONS, LIST_ACCESSORIES, LIST_PET_SKILLS as DEFAULT_PET_SKILLS, PetSkill, getRandomPokemon, getEvolvedForm } from './pokemonData';
 import { useAuth } from './AuthContext';
 import { fetchUserSettings, upsertUserSettings } from './supabaseData';
 
@@ -161,11 +161,71 @@ const AuthLoginForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
   );
 };
 
+interface SettingsSectionProps {
+  id: string;
+  title: string;
+  icon: string;
+  subtitle?: string;
+  className?: string;
+  collapsedSections: Record<string, boolean>;
+  onToggle: (section: string) => void;
+  children: React.ReactNode;
+}
+
+const SettingsSection: React.FC<SettingsSectionProps> = ({
+  id,
+  title,
+  icon,
+  subtitle,
+  className = 'bg-white p-10 rounded-[40px] border shadow-sm space-y-8',
+  collapsedSections,
+  onToggle,
+  children
+}) => {
+  const isCollapsed = !!collapsedSections[id];
+  return (
+    <section className={className}>
+      <div className="flex items-center justify-between gap-4 border-b pb-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="text-3xl shrink-0">{icon}</span>
+          <div className="min-w-0">
+            <h3 className="text-2xl font-royal text-red-800">{title}</h3>
+            {subtitle && <p className="text-xs text-stone-500 font-bold mt-1">{subtitle}</p>}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => onToggle(id)}
+          className={`shrink-0 w-16 h-8 rounded-full border-2 p-1 transition-all ${isCollapsed ? 'bg-stone-200 border-stone-300' : 'bg-red-800 border-red-900'}`}
+          aria-label={isCollapsed ? `Hiện ${title}` : `Ẩn ${title}`}
+          title={isCollapsed ? `Hiện ${title}` : `Ẩn ${title}`}
+        >
+          <span className={`block w-5 h-5 rounded-full bg-white shadow transition-transform ${isCollapsed ? 'translate-x-0' : 'translate-x-8'}`} />
+        </button>
+      </div>
+      {!isCollapsed && children}
+    </section>
+  );
+};
+
 const App: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [ranksMale, setRanksMale] = useState<RankInfo[]>(DEFAULT_RANKS_MALE);
   const [ranksFemale, setRanksFemale] = useState<RankInfo[]>(DEFAULT_RANKS_FEMALE);
   const [skills, setSkills] = useState<Skill[]>(DEFAULT_SKILLS);
+  const [petSkills, setPetSkills] = useState<PetSkill[]>(() => {
+    const saved = localStorage.getItem(PET_SKILLS_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (err) {
+        console.error("Error loading custom Pokemon skills:", err);
+      }
+    }
+    return DEFAULT_PET_SKILLS;
+  });
+  const [currentTime, setCurrentTime] = useState(new Date());
   
   const [currentScreen, setCurrentScreen] = useState<Screen>('school');
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
@@ -206,6 +266,7 @@ const App: React.FC = () => {
   const [ludoMonsterStuck, setLudoMonsterStuck] = useState<Record<string, boolean>>({});
   const [ludoVisitedSpecialTiles, setLudoVisitedSpecialTiles] = useState<Record<number, boolean>>({});
   const [ludoActiveStudent, setLudoActiveStudent] = useState<Student | null>(null);
+  const [ludoClassName, setLudoClassName] = useState<string>('');
   const [ludoDice, setLudoDice] = useState<number | null>(null);
   const [ludoRolling, setLudoRolling] = useState(false);
   const [ludoPopup, setLudoPopup] = useState<{ title: string; desc: string; icon: string } | null>(null);
@@ -285,6 +346,14 @@ const App: React.FC = () => {
   const [editingPhotoURL, setEditingPhotoURL] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [settingsCollapsed, setSettingsCollapsed] = useState<Record<string, boolean>>({
+    sound: false,
+    ranks: false,
+    skills: false,
+    petSkills: false,
+    ludo: false,
+    data: false
+  });
 
   useEffect(() => {
     if (profile) {
@@ -295,6 +364,11 @@ const App: React.FC = () => {
       setConfirmLogout(false);
     }
   }, [profile, showUserModal]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Sync state FROM Supabase on login (high priority)
   useEffect(() => {
@@ -318,6 +392,10 @@ const App: React.FC = () => {
           if (cloudData.ranksMale && Array.isArray(cloudData.ranksMale)) setRanksMale(cloudData.ranksMale);
           if (cloudData.ranksFemale && Array.isArray(cloudData.ranksFemale)) setRanksFemale(cloudData.ranksFemale);
           if (cloudData.skills && Array.isArray(cloudData.skills)) setSkills(cloudData.skills);
+          if (cloudData.petSkills && Array.isArray(cloudData.petSkills) && cloudData.petSkills.length > 0) {
+            setPetSkills(cloudData.petSkills);
+            localStorage.setItem(PET_SKILLS_KEY, JSON.stringify(cloudData.petSkills));
+          }
           if (cloudData.posSoundUrl) setPosSoundUrl(cloudData.posSoundUrl);
           if (cloudData.negSoundUrl) setNegSoundUrl(cloudData.negSoundUrl);
           if (cloudData.timerSoundUrl) setTimerSoundUrl(cloudData.timerSoundUrl);
@@ -333,6 +411,7 @@ const App: React.FC = () => {
             ranksMale: cloudData.ranksMale || [],
             ranksFemale: cloudData.ranksFemale || [],
             skills: cloudData.skills || [],
+            petSkills: cloudData.petSkills || DEFAULT_PET_SKILLS,
             posSoundUrl: cloudData.posSoundUrl || '',
             negSoundUrl: cloudData.negSoundUrl || '',
             timerSoundUrl: cloudData.timerSoundUrl || '',
@@ -344,6 +423,7 @@ const App: React.FC = () => {
           if (cloudData.ranksMale) localStorage.setItem(RANKS_KEY_MALE, JSON.stringify(cloudData.ranksMale));
           if (cloudData.ranksFemale) localStorage.setItem(RANKS_KEY_FEMALE, JSON.stringify(cloudData.ranksFemale));
           if (cloudData.skills) localStorage.setItem(SKILLS_KEY, JSON.stringify(cloudData.skills));
+          if (cloudData.petSkills) localStorage.setItem(PET_SKILLS_KEY, JSON.stringify(cloudData.petSkills));
           if (cloudData.posSoundUrl) localStorage.setItem('imperial_sound_pos', cloudData.posSoundUrl);
           if (cloudData.negSoundUrl) localStorage.setItem('imperial_sound_neg', cloudData.negSoundUrl);
           if (cloudData.timerSoundUrl) localStorage.setItem('imperial_sound_tim', cloudData.timerSoundUrl);
@@ -368,12 +448,16 @@ const App: React.FC = () => {
           const savedSkills = localStorage.getItem(SKILLS_KEY);
           const localSkills = savedSkills ? JSON.parse(savedSkills) : DEFAULT_SKILLS;
 
+          const savedPetSkills = localStorage.getItem(PET_SKILLS_KEY);
+          const localPetSkills = savedPetSkills ? JSON.parse(savedPetSkills) : DEFAULT_PET_SKILLS;
+
           // Push local state to cloud to prevent data loss on onboarding
           const updatedAt = await upsertUserSettings(user.uid, {
             students: localStudents,
             ranksMale: localMaleRanks,
             ranksFemale: localFemaleRanks,
             skills: localSkills,
+            petSkills: localPetSkills,
             posSoundUrl,
             negSoundUrl,
             timerSoundUrl,
@@ -385,6 +469,7 @@ const App: React.FC = () => {
             ranksMale: localMaleRanks,
             ranksFemale: localFemaleRanks,
             skills: localSkills,
+            petSkills: localPetSkills,
             posSoundUrl,
             negSoundUrl,
             timerSoundUrl,
@@ -395,6 +480,7 @@ const App: React.FC = () => {
           setRanksMale(localMaleRanks);
           setRanksFemale(localFemaleRanks);
           setSkills(localSkills);
+          setPetSkills(localPetSkills);
           setLastSyncedTime(updatedAt);
         }
         setCloudLoadSuccess(true);
@@ -420,6 +506,7 @@ const App: React.FC = () => {
       ranksMale,
       ranksFemale,
       skills,
+      petSkills,
       posSoundUrl,
       negSoundUrl,
       timerSoundUrl,
@@ -441,6 +528,7 @@ const App: React.FC = () => {
           ranksMale,
           ranksFemale,
           skills,
+          petSkills,
           posSoundUrl,
           negSoundUrl,
           timerSoundUrl,
@@ -457,7 +545,7 @@ const App: React.FC = () => {
     }, 1500); // 1.5s debounce to group multiple rapid edits together
 
     return () => clearTimeout(timer);
-  }, [students, ranksMale, ranksFemale, skills, posSoundUrl, negSoundUrl, timerSoundUrl, customLudoTiles, user, initialCloudLoadComplete, cloudLoadSuccess]);
+  }, [students, ranksMale, ranksFemale, skills, petSkills, posSoundUrl, negSoundUrl, timerSoundUrl, customLudoTiles, user, initialCloudLoadComplete, cloudLoadSuccess]);
 
   // Sync Ludo position state maps whenever students array loads or changes
   useEffect(() => {
@@ -482,6 +570,16 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('custom_ludo_tiles', JSON.stringify(customLudoTiles));
   }, [customLudoTiles]);
+
+  useEffect(() => {
+    localStorage.setItem(PET_SKILLS_KEY, JSON.stringify(petSkills));
+  }, [petSkills]);
+
+  useEffect(() => {
+    if (ludoActiveStudent && ludoActiveStudent.className !== activeLudoClassName) {
+      setLudoActiveStudent(null);
+    }
+  }, [activeLudoClassName, ludoActiveStudent]);
 
   // Remind user to backup to cloud before leaving/closing tab
   useEffect(() => {
@@ -539,6 +637,10 @@ const App: React.FC = () => {
       const savedSkills = localStorage.getItem(SKILLS_KEY);
       if (savedSkills) setSkills(JSON.parse(savedSkills));
       else setSkills(DEFAULT_SKILLS);
+
+      const savedPetSkills = localStorage.getItem(PET_SKILLS_KEY);
+      if (savedPetSkills) setPetSkills(JSON.parse(savedPetSkills));
+      else setPetSkills(DEFAULT_PET_SKILLS);
       
       const sPos = localStorage.getItem('imperial_sound_pos');
       const sNeg = localStorage.getItem('imperial_sound_neg');
@@ -594,8 +696,41 @@ const App: React.FC = () => {
   }, [students, filterClass, searchQuery, sortType]);
 
   const presentStudents = useMemo(() => currentClassStudents.filter(s => !s.isAbsent), [currentClassStudents]);
+  const classOptions = useMemo(() => classes.filter(c => c !== 'Tất cả'), [classes]);
+  const activeLudoClassName = ludoClassName || (filterClass !== 'Tất cả' ? filterClass : classOptions[0] || '');
+  const ludoRaceStudents = useMemo(() => {
+    if (!activeLudoClassName) return [];
+    return students
+      .filter(s => s.className === activeLudoClassName && !s.isAbsent)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [students, activeLudoClassName]);
+
+  const formattedClockTime = currentTime.toLocaleTimeString('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+  const clockWeekday = currentTime.getDay() === 0 ? 'Chủ Nhật' : `Thứ ${currentTime.getDay() + 1}`;
+  const formattedClockDate = `${clockWeekday}, ${currentTime.toLocaleDateString('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  })}`;
 
   // Actions
+  const openLudoForClass = (className?: string, activeStudent?: Student | null) => {
+    const nextClass = className || (filterClass !== 'Tất cả' ? filterClass : classOptions[0] || '');
+    if (!nextClass) {
+      alert("Chưa có lớp nào để mở đường đua Cá Ngựa.");
+      return;
+    }
+    setLudoClassName(nextClass);
+    setLudoActiveStudent(activeStudent && activeStudent.className === nextClass ? activeStudent : null);
+    setLudoDice(null);
+    setShowLudoModal(true);
+  };
+
   const handleUpdatePoints = async (ids: string[], amount: number, reason: string) => {
     if (isNaN(amount)) return;
 
@@ -949,6 +1084,7 @@ const App: React.FC = () => {
     const data = {
       students,
       skills,
+      petSkills,
       ranksMale,
       ranksFemale,
       posSoundUrl,
@@ -980,6 +1116,10 @@ const App: React.FC = () => {
         if (data.skills && Array.isArray(data.skills)) {
           setSkills(data.skills);
         }
+        if (data.petSkills && Array.isArray(data.petSkills)) {
+          setPetSkills(data.petSkills);
+          localStorage.setItem(PET_SKILLS_KEY, JSON.stringify(data.petSkills));
+        }
         if (data.ranksMale && Array.isArray(data.ranksMale)) {
           setRanksMale(data.ranksMale);
         }
@@ -1004,6 +1144,7 @@ const App: React.FC = () => {
               ranksMale: data.ranksMale || [],
               ranksFemale: data.ranksFemale || [],
               skills: data.skills || [],
+              petSkills: data.petSkills || petSkills,
               posSoundUrl: data.posSoundUrl || "",
               negSoundUrl: data.negSoundUrl || "",
               timerSoundUrl: data.timerSoundUrl || "",
@@ -1039,6 +1180,7 @@ const App: React.FC = () => {
         ranksMale,
         ranksFemale,
         skills,
+        petSkills,
         posSoundUrl,
         negSoundUrl,
         timerSoundUrl,
@@ -1082,6 +1224,10 @@ const App: React.FC = () => {
         }
         if (cloudData.skills && Array.isArray(cloudData.skills)) {
           setSkills(cloudData.skills);
+        }
+        if (cloudData.petSkills && Array.isArray(cloudData.petSkills) && cloudData.petSkills.length > 0) {
+          setPetSkills(cloudData.petSkills);
+          localStorage.setItem(PET_SKILLS_KEY, JSON.stringify(cloudData.petSkills));
         }
         if (cloudData.posSoundUrl) {
           setPosSoundUrl(cloudData.posSoundUrl);
@@ -1524,9 +1670,11 @@ const App: React.FC = () => {
 
       // Collision / Kicking check
       let kickedStudent: Student | null = null;
-      Object.entries(ludoPositions).forEach(([otherId, pos]) => {
-        if (otherId !== student.id && pos === newPos && newPos !== 0) {
-          kickedStudent = students.find(s => s.id === otherId) || null;
+      students
+        .filter(s => s.className === student.className && !s.isAbsent)
+        .forEach(other => {
+        if (other.id !== student.id && (ludoPositions[other.id] || 0) === newPos && newPos !== 0) {
+          kickedStudent = other;
         }
       });
 
@@ -1765,6 +1913,25 @@ const App: React.FC = () => {
     setSkills(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s));
   };
 
+  const updatePetSkill = (id: string, field: keyof PetSkill, value: any) => {
+    setPetSkills(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s));
+  };
+
+  const addPetSkill = () => {
+    const newSkill: PetSkill = {
+      id: `sk_custom_${Date.now()}`,
+      name: 'Tuyệt chiêu mới',
+      icon: '✨',
+      cost: 20,
+      description: 'Mô tả quyền năng Pokémon mới.'
+    };
+    setPetSkills(prev => [...prev, newSkill]);
+  };
+
+  const toggleSettingsSection = (section: string) => {
+    setSettingsCollapsed(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-[#5d4037] flex flex-col items-center justify-center text-white font-sans">
@@ -1830,9 +1997,21 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_50%_0%,#fffbf2_0%,#f5ebe0_100%)] pb-32">
-      {/* TOOLBAR & CENTER NAVIGATION BAR */}
-      <nav className="sticky top-0 z-40 p-3 sm:p-4 backdrop-blur-xl bg-gradient-to-r from-red-950/95 via-red-900/95 to-amber-950/95 border-b-2 border-amber-400/50 shadow-[0_10px_30px_rgba(0,0,0,0.3)]">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
+      {/* CLOCK + AUTO-HIDE NAVIGATION BAR */}
+      <div className="sticky top-0 z-40 group/topbar">
+        <div className="min-h-[96px] sm:min-h-[110px] flex flex-col items-center justify-center bg-gradient-to-b from-red-950 via-red-900 to-amber-950 text-amber-100 border-b-2 border-amber-400/50 shadow-[0_10px_30px_rgba(0,0,0,0.25)]">
+          <div className="text-center select-none leading-none">
+            <div className="font-mono text-5xl sm:text-7xl font-black text-amber-200 tabular-nums drop-shadow-[0_3px_0_rgba(0,0,0,0.35)]">
+              {formattedClockTime}
+            </div>
+            <div className="mt-3 text-sm sm:text-lg font-black uppercase text-amber-300">
+              {formattedClockDate}
+            </div>
+          </div>
+        </div>
+
+        <nav className="absolute inset-x-0 top-0 p-3 sm:p-4 backdrop-blur-xl bg-gradient-to-r from-red-950/98 via-red-900/98 to-amber-950/98 border-b-2 border-amber-400/50 shadow-[0_10px_30px_rgba(0,0,0,0.3)] -translate-y-full opacity-0 pointer-events-none group-hover/topbar:translate-y-0 group-hover/topbar:opacity-100 group-hover/topbar:pointer-events-auto focus-within:translate-y-0 focus-within:opacity-100 focus-within:pointer-events-auto transition-all duration-300">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
           
           {/* Left: Brand */}
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setCurrentScreen('school')}>
@@ -1941,8 +2120,9 @@ const App: React.FC = () => {
             </button>
           </div>
 
-        </div>
-      </nav>
+          </div>
+        </nav>
+      </div>
 
       {/* MAIN CONTENT */}
       <main className="max-w-7xl mx-auto p-6">
@@ -2016,6 +2196,7 @@ const App: React.FC = () => {
                   <StudentCard 
                     student={s} 
                     getRank={getRank} 
+                    petSkills={petSkills}
                     isSelected={selectedStudentIds.includes(s.id)}
                     onSelect={(st) => {
                       if (isMultiSelectMode) {
@@ -2040,7 +2221,7 @@ const App: React.FC = () => {
             {/* CLASS BOTTOM TOOLS - LIQUID GLASS FLOATING DOCK WITH MAGNIFICATION */}
             <LiquidDock
               onRandom={handleRandom}
-              onLudo={() => setShowLudoModal(true)}
+              onLudo={() => openLudoForClass()}
               onGroup={() => setShowGroupModal(true)}
               onTimer={() => setShowTimerModal(true)}
               onSelectAll={handleToggleSelectAll}
@@ -2468,7 +2649,7 @@ const App: React.FC = () => {
                         <p className="text-xs text-indigo-950/70 font-sans">Kích hoạt trực tiếp quyền năng thần bí để lật ngược thế cờ kiểm tra! Mật tịch bốc hơi ngay sau 2 lần sử dụng.</p>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           {editingStudent.pet.skills.map(skId => {
-                            const sk = LIST_PET_SKILLS.find(x => x.id === skId);
+                            const sk = petSkills.find(x => x.id === skId);
                             if (!sk) return null;
                             const currentUses = editingStudent.pet?.skillUses?.[skId] || 0;
                             const remainingUses = Math.max(0, 2 - currentUses);
@@ -2545,7 +2726,7 @@ const App: React.FC = () => {
                       <p className="text-xs text-purple-800/70 font-sans">Huấn luyện tuyện kỹ học đường cho linh thú để trợ oai đổi đề, né câu, đỡ phạt oanh tạc triều học!</p>
                       
                       <div className="space-y-2 max-h-[420px] overflow-y-auto pr-2 custom-scrollbar font-sans font-[Inter]">
-                        {LIST_PET_SKILLS.map(sk => {
+                        {petSkills.map(sk => {
                           const isLearned = editingStudent.pet?.skills.includes(sk.id);
                           return (
                             <div key={sk.id} className="bg-white p-4 border border-gray-100 rounded-3xl flex items-center justify-between gap-4 shadow-sm hover:border-purple-200 hover:bg-purple-50/10 transition-all font-[Inter]">
@@ -2584,42 +2765,28 @@ const App: React.FC = () => {
         )}
 
         {currentScreen === 'settings' && (
-          <div className="animate-in slide-in-from-bottom-4 duration-500 space-y-12 pb-12">
+          <div className="animate-in slide-in-from-bottom-4 duration-500 space-y-8 pb-12">
             <h2 className="text-3xl font-royal text-red-800 text-center uppercase">Thiết Lập Triều Đình</h2>
-            
-            {/* SOUND SETTINGS */}
-            <div className="bg-white p-10 rounded-[40px] border shadow-sm space-y-8">
-               <h3 className="text-2xl font-royal text-red-800 border-b pb-4">Cài Đặt Âm Thanh (Youtube/Audio URL)</h3>
-               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                 <div className="space-y-2">
-                   <label className="text-[10px] font-black uppercase text-gray-400">Cộng Điểm (Tích cực)</label>
-                   <input 
-                    className="w-full border p-3 rounded-xl text-xs outline-none focus:ring-2 ring-red-800/20" 
-                    value={posSoundUrl} 
-                    onChange={e => setPosSoundUrl(e.target.value)} 
-                    placeholder="Link âm thanh..."
-                   />
-                 </div>
-                 <div className="space-y-2">
-                   <label className="text-[10px] font-black uppercase text-gray-400">Trừ Điểm (Cần cố gắng)</label>
-                   <input 
-                    className="w-full border p-3 rounded-xl text-xs outline-none focus:ring-2 ring-red-800/20" 
-                    value={negSoundUrl} 
-                    onChange={e => setNegSoundUrl(e.target.value)} 
-                    placeholder="Link âm thanh..."
-                   />
-                 </div>
-                 <div className="space-y-2">
-                   <label className="text-[10px] font-black uppercase text-gray-400">Timer Hết Giờ</label>
-                   <input 
-                    className="w-full border p-3 rounded-xl text-xs outline-none focus:ring-2 ring-red-800/20" 
-                    value={timerSoundUrl} 
-                    onChange={e => setTimerSoundUrl(e.target.value)} 
-                    placeholder="Link âm thanh..."
-                   />
-                 </div>
-               </div>
-               <button 
+
+            <SettingsSection id="sound" icon="🔊" title="Cài Đặt Âm Thanh" subtitle="Youtube hoặc audio URL cho cộng điểm, trừ điểm và timer." collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {[
+                  ['Cộng Điểm (Tích cực)', posSoundUrl, setPosSoundUrl],
+                  ['Trừ Điểm (Cần cố gắng)', negSoundUrl, setNegSoundUrl],
+                  ['Timer Hết Giờ', timerSoundUrl, setTimerSoundUrl]
+                ].map(([label, value, setter]) => (
+                  <div key={label as string} className="space-y-2">
+                    <label className="text-[10px] font-black uppercase text-gray-400">{label as string}</label>
+                    <input
+                      className="w-full border p-3 rounded-xl text-xs outline-none focus:ring-2 ring-red-800/20"
+                      value={value as string}
+                      onChange={e => (setter as React.Dispatch<React.SetStateAction<string>>)(e.target.value)}
+                      placeholder="Link âm thanh..."
+                    />
+                  </div>
+                ))}
+              </div>
+              <button
                 onClick={() => {
                   localStorage.setItem('imperial_sound_pos', posSoundUrl);
                   localStorage.setItem('imperial_sound_neg', negSoundUrl);
@@ -2627,359 +2794,209 @@ const App: React.FC = () => {
                   alert("Đã lưu cài đặt âm thanh!");
                 }}
                 className="bg-red-800 text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-red-900 transition-all uppercase text-xs"
-               >Lưu Âm Thanh</button>
-            </div>
+              >
+                Lưu Âm Thanh
+              </button>
+            </SettingsSection>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-              {[Gender.FEMALE, Gender.MALE].map(g => (
-                <div key={g} className="bg-gray-50 p-8 rounded-[40px] border shadow-sm">
-                  <div className="flex justify-between items-center mb-8">
-                    <h3 className="text-2xl font-royal text-red-800">Cấp Bậc {g}</h3>
-                    <button onClick={() => {
-                      const title = prompt("Tên rank mới:");
-                      if (!title) return;
-                      const pts = parseInt(prompt("Điểm tối thiểu:") || '0');
-                      const newRank: RankInfo = { id: Date.now().toString(), level: 0, title, minPoints: pts, maxPoints: pts + 49, color: 'text-gray-600', avatar: '' };
-                      if (g === Gender.MALE) setRanksMale(prev => [...prev, newRank].sort((a,b) => a.minPoints - b.minPoints));
-                      else setRanksFemale(prev => [...prev, newRank].sort((a,b) => a.minPoints - b.minPoints));
-                    }} className="bg-red-800 text-white w-10 h-10 rounded-full font-bold">+</button>
+            <SettingsSection id="ranks" icon="👑" title="Cấp Bậc" subtitle="Tùy chỉnh cấp bậc Nam/Nữ, điểm tối thiểu và avatar từng rank." collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {[Gender.FEMALE, Gender.MALE].map(g => (
+                  <div key={g} className="bg-gray-50 p-6 rounded-[32px] border shadow-sm">
+                    <div className="flex justify-between items-center mb-6">
+                      <h4 className="text-xl font-royal text-red-800">Cấp Bậc {g}</h4>
+                      <button onClick={() => {
+                        const title = prompt("Tên rank mới:");
+                        if (!title) return;
+                        const pts = parseInt(prompt("Điểm tối thiểu:") || '0');
+                        const newRank: RankInfo = { id: Date.now().toString(), level: 0, title, minPoints: pts, maxPoints: pts + 49, color: 'text-gray-600', avatar: '' };
+                        if (g === Gender.MALE) setRanksMale(prev => [...prev, newRank].sort((a,b) => a.minPoints - b.minPoints));
+                        else setRanksFemale(prev => [...prev, newRank].sort((a,b) => a.minPoints - b.minPoints));
+                      }} className="bg-red-800 text-white w-10 h-10 rounded-full font-bold">+</button>
+                    </div>
+                    <div className="space-y-4">
+                      {(g === Gender.MALE ? ranksMale : ranksFemale).map(r => (
+                        <div key={r.id} className="flex items-center gap-4 bg-white p-4 rounded-3xl border hover:border-red-800/30 transition-all shadow-sm">
+                          <div className="w-14 h-14 shrink-0 border-2 border-gray-100 rounded-full overflow-hidden relative group">
+                            <img src={r.avatar || 'https://api.dicebear.com/7.x/bottts/svg'} className="w-full h-full object-cover" />
+                            <label className="absolute inset-0 cursor-pointer bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-[8px] text-white font-black uppercase text-center p-1">
+                              Tải Ảnh
+                              <input type="file" accept="image/*" onChange={e => handleAvatarUpload(g, r.id, e)} className="hidden" />
+                            </label>
+                          </div>
+                          <div className="flex-1 space-y-2 min-w-0">
+                            <input className="w-full text-base font-bold border-b-2 border-transparent focus:border-red-800 outline-none transition-all" value={r.title} onChange={e => {
+                              const updater = (prev: RankInfo[]) => prev.map(x => x.id === r.id ? {...x, title: e.target.value} : x);
+                              if (g === Gender.MALE) setRanksMale(updater); else setRanksFemale(updater);
+                            }} />
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] uppercase font-bold opacity-30">Min:</span>
+                              <input type="number" className="w-20 text-xs border p-1 rounded" value={r.minPoints} onChange={e => {
+                                const pts = parseInt(e.target.value) || 0;
+                                const updater = (prev: RankInfo[]) => prev.map(x => x.id === r.id ? {...x, minPoints: pts} : x);
+                                if (g === Gender.MALE) setRanksMale(updater); else setRanksFemale(updater);
+                              }} />
+                            </div>
+                          </div>
+                          <button onClick={() => {
+                            if (confirm('Xóa cấp bậc này?')) {
+                              const updater = (prev: RankInfo[]) => prev.filter(x => x.id !== r.id);
+                              if (g === Gender.MALE) setRanksMale(updater); else setRanksFemale(updater);
+                            }
+                          }} className="text-gray-300 hover:text-red-600 transition-colors">🗑️</button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="space-y-4">
-                    {(g === Gender.MALE ? ranksMale : ranksFemale).map(r => (
-                      <div key={r.id} className="flex items-center gap-6 bg-white p-5 rounded-3xl border hover:border-red-800/30 transition-all shadow-sm">
-                        <div className="w-16 h-16 shrink-0 border-2 border-gray-100 rounded-full overflow-hidden relative group">
-                          <img src={r.avatar || 'https://api.dicebear.com/7.x/bottts/svg'} className="w-full h-full object-cover" />
-                          <label className="absolute inset-0 cursor-pointer bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-[8px] text-white font-black uppercase text-center p-1">
-                            Tải Ảnh
-                            <input type="file" accept="image/*" onChange={e => handleAvatarUpload(g, r.id, e)} className="hidden" />
-                          </label>
-                        </div>
-                        <div className="flex-1 space-y-2">
-                           <input className="w-full text-lg font-bold border-b-2 border-transparent focus:border-red-800 outline-none transition-all" value={r.title} onChange={e => {
-                             const updater = (prev: RankInfo[]) => prev.map(x => x.id === r.id ? {...x, title: e.target.value} : x);
-                             if (g === Gender.MALE) setRanksMale(updater); else setRanksFemale(updater);
-                           }} />
-                           <div className="flex items-center gap-4">
-                             <div className="flex items-center gap-2">
-                               <span className="text-[10px] uppercase font-bold opacity-30">Min:</span>
-                               <input type="number" className="w-16 text-xs border p-1 rounded" value={r.minPoints} onChange={e => {
-                                 const pts = parseInt(e.target.value) || 0;
-                                 const updater = (prev: RankInfo[]) => prev.map(x => x.id === r.id ? {...x, minPoints: pts} : x);
-                                 if (g === Gender.MALE) setRanksMale(updater); else setRanksFemale(updater);
-                               }} />
-                             </div>
-                           </div>
-                        </div>
-                        <button onClick={() => {
-                          if (confirm('Xóa cấp bậc này?')) {
-                             const updater = (prev: RankInfo[]) => prev.filter(x => x.id !== r.id);
-                             if (g === Gender.MALE) setRanksMale(updater); else setRanksFemale(updater);
-                          }
-                        }} className="text-gray-300 hover:text-red-600 transition-colors">🗑️</button>
+                ))}
+              </div>
+            </SettingsSection>
+
+            <SettingsSection id="skills" icon="✨" title="Công Trạng" subtitle="Tùy chỉnh điểm cộng/trừ trong bảng feedback." collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
+              <div className="flex justify-end">
+                <button onClick={() => {
+                  const type = activeTab;
+                  const newSkill: Skill = { id: Date.now().toString(), name: "Skill mới", icon: "✨", points: type === 'positive' ? 1 : -1, type };
+                  setSkills(prev => [...prev, newSkill]);
+                }} className="bg-purple-800 text-white px-6 py-2 rounded-xl font-bold text-xs">+ Thêm Skill</button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {['positive', 'negative'].map(type => (
+                  <div key={type} className="space-y-4">
+                    <h4 className="font-bold text-sm uppercase tracking-[0.2em] opacity-40 text-purple-800">{type === 'positive' ? 'Tích Cực' : 'Cần Cố Gắng'}</h4>
+                    {skills.filter(s => s.type === type).map(sk => (
+                      <div key={sk.id} className="bg-white p-4 rounded-2xl border flex items-center gap-3 group shadow-sm">
+                        <input value={sk.icon} onChange={e => updateSkill(sk.id, 'icon', e.target.value)} className="w-10 h-10 text-xl text-center bg-gray-50 rounded-lg outline-none focus:ring-2 ring-purple-100" />
+                        <input value={sk.name} onChange={e => updateSkill(sk.id, 'name', e.target.value)} className="flex-1 min-w-0 font-bold text-sm outline-none bg-transparent border-b border-transparent focus:border-purple-200" placeholder="Tên skill..." />
+                        <input type="number" value={sk.points} onChange={e => updateSkill(sk.id, 'points', parseInt(e.target.value) || 0)} className="w-14 text-center font-black text-xs p-1 bg-gray-50 rounded outline-none focus:ring-2 ring-purple-100" />
+                        <button onClick={() => { if(confirm('Xóa skill này?')) setSkills(prev => prev.filter(x => x.id !== sk.id)); }} className="text-gray-300 hover:text-red-500 transition-colors p-2">🗑️</button>
                       </div>
                     ))}
-                    <button onClick={() => { if(confirm('Xóa sạch?')) g === Gender.MALE ? setRanksMale([]) : setRanksFemale([]); }} className="w-full py-3 text-[10px] font-bold uppercase tracking-widest text-red-300 hover:text-red-800 transition-colors">Dẹp bỏ toàn bộ rank {g}</button>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </SettingsSection>
 
-            {/* SKILLS MANAGEMENT */}
-            <div className="bg-gray-50 p-10 rounded-[40px] border">
-               <div className="flex justify-between items-center mb-10">
-                 <h3 className="text-2xl font-royal text-purple-800">Cài đặt Công Trạng (Skills)</h3>
-                 <button onClick={() => {
-                   const type = activeTab; // Defaults to current active tab
-                   const newSkill: Skill = { id: Date.now().toString(), name: "Skill mới", icon: "✨", points: type === 'positive' ? 1 : -1, type };
-                   setSkills(prev => [...prev, newSkill]);
-                 }} className="bg-purple-800 text-white px-6 py-2 rounded-xl font-bold text-xs">+ Thêm Skill</button>
-               </div>
-               
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  {['positive', 'negative'].map(type => (
-                    <div key={type} className="space-y-6">
-                      <h4 className="font-bold text-sm uppercase tracking-[0.2em] opacity-40 text-purple-800">{type === 'positive' ? 'Tích Cực' : 'Cần Cố Gắng'}</h4>
-                      <div className="space-y-3">
-                        {skills.filter(s => s.type === type).map(sk => (
-                          <div key={sk.id} className="bg-white p-4 rounded-2xl border flex items-center gap-3 group shadow-sm">
-                             {/* Editable Icon */}
-                             <input 
-                               value={sk.icon} 
-                               onChange={e => updateSkill(sk.id, 'icon', e.target.value)} 
-                               className="w-10 h-10 text-xl text-center bg-gray-50 rounded-lg outline-none focus:ring-2 ring-purple-100"
-                               title="Thay đổi Emoji"
-                             />
-                             {/* Editable Name */}
-                             <div className="flex-1">
-                               <input 
-                                 value={sk.name} 
-                                 onChange={e => updateSkill(sk.id, 'name', e.target.value)} 
-                                 className="w-full font-bold text-sm outline-none bg-transparent border-b border-transparent focus:border-purple-200"
-                                 placeholder="Tên skill..."
-                               />
-                             </div>
-                             {/* Editable Points */}
-                             <div className="flex items-center gap-1">
-                               <input 
-                                 type="number"
-                                 value={sk.points} 
-                                 onChange={e => updateSkill(sk.id, 'points', parseInt(e.target.value) || 0)} 
-                                 className="w-14 text-center font-black text-xs p-1 bg-gray-50 rounded outline-none focus:ring-2 ring-purple-100"
-                               />
-                               <span className="text-[10px] opacity-30 font-bold">PTS</span>
-                             </div>
-                             {/* Delete Button */}
-                             <button onClick={() => { if(confirm('Xóa skill này?')) setSkills(prev => prev.filter(x => x.id !== sk.id)); }} className="text-gray-300 hover:text-red-500 transition-colors p-2">🗑️</button>
-                          </div>
-                        ))}
-                      </div>
+            <SettingsSection id="petSkills" icon="⚡" title="Skills Pokémon" subtitle="Tùy chỉnh tuyệt chiêu Pokémon, giá mua và mô tả hiển thị trong hồ sơ học sinh." collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
+              <div className="flex flex-wrap justify-end gap-3">
+                <button onClick={addPetSkill} className="bg-indigo-700 text-white px-6 py-2 rounded-xl font-bold text-xs">+ Thêm Pokémon Skill</button>
+                <button onClick={() => { if(confirm('Khôi phục danh sách Pokémon skills mặc định?')) setPetSkills(DEFAULT_PET_SKILLS); }} className="bg-indigo-100 text-indigo-900 px-6 py-2 rounded-xl font-bold text-xs border border-indigo-200">Khôi Phục Mặc Định</button>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {petSkills.map(sk => (
+                  <div key={sk.id} className="bg-white p-4 rounded-3xl border border-indigo-100 shadow-sm space-y-3">
+                    <div className="grid grid-cols-[48px_1fr_86px_auto] gap-3 items-center">
+                      <input value={sk.icon} onChange={e => updatePetSkill(sk.id, 'icon', e.target.value)} className="w-12 h-12 text-2xl text-center bg-indigo-50 rounded-2xl outline-none focus:ring-2 ring-indigo-100" />
+                      <input value={sk.name} onChange={e => updatePetSkill(sk.id, 'name', e.target.value)} className="min-w-0 font-black text-sm border-b border-transparent focus:border-indigo-200 outline-none" />
+                      <input type="number" value={sk.cost} onChange={e => updatePetSkill(sk.id, 'cost', parseInt(e.target.value) || 0)} className="w-full text-center font-black text-xs p-2 bg-indigo-50 rounded-xl outline-none focus:ring-2 ring-indigo-100" />
+                      <button onClick={() => { if(confirm('Xóa Pokémon skill này?')) setPetSkills(prev => prev.filter(x => x.id !== sk.id)); }} className="text-gray-300 hover:text-red-500 transition-colors p-2">🗑️</button>
                     </div>
-                  ))}
-               </div>
-            </div>
-
-            {/* Customize Ludo Tiles Section */}
-            <div className="bg-amber-50 p-6 sm:p-10 rounded-[40px] border-4 border-amber-300 text-left space-y-6 my-8">
-              <div className="flex items-center justify-between border-b border-amber-200 pb-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-3xl">🐴</span>
-                  <div>
-                    <h3 className="text-2xl font-royal text-amber-950 uppercase tracking-wider">Customize Cá Ngựa</h3>
-                    <p className="text-xs text-amber-800">Thêm, chỉnh sửa hoặc xóa các ô đặc biệt trên bàn cờ Cá Ngựa (0 đến 49)</p>
+                    <textarea value={sk.description} onChange={e => updatePetSkill(sk.id, 'description', e.target.value)} className="w-full min-h-20 border border-indigo-100 rounded-2xl p-3 text-xs outline-none focus:ring-2 ring-indigo-100 resize-y" />
                   </div>
-                </div>
-                <button
-                  onClick={() => setCustomLudoTiles(DEFAULT_LUDO_TILES)}
-                  className="bg-amber-200 hover:bg-amber-300 text-amber-950 px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all"
-                >
+                ))}
+              </div>
+            </SettingsSection>
+
+            <SettingsSection id="ludo" icon="🐴" title="Customize Cá Ngựa" subtitle="Thêm, chỉnh sửa hoặc xóa ô đặc biệt trên bàn cờ 0-49." className="bg-amber-50 p-6 sm:p-10 rounded-[40px] border-4 border-amber-300 text-left space-y-6 my-8" collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
+              <div className="flex justify-end">
+                <button onClick={() => setCustomLudoTiles(DEFAULT_LUDO_TILES)} className="bg-amber-200 hover:bg-amber-300 text-amber-950 px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all">
                   Khôi Phục Mặc Định 🔄
                 </button>
               </div>
-
-              {/* Form for adding/editing tile */}
               <div className="bg-white p-5 rounded-3xl border-2 border-amber-200 space-y-4">
-                <h4 className="font-black text-amber-950 text-sm uppercase">
-                  {editingTileIndex !== null ? `Chỉnh Sửa Ô Số ${editingTileIndex}` : 'Thêm/Sửa Ô Đặc Biệt Mới'}
-                </h4>
+                <h4 className="font-black text-amber-950 text-sm uppercase">{editingTileIndex !== null ? `Chỉnh Sửa Ô Số ${editingTileIndex}` : 'Thêm/Sửa Ô Đặc Biệt Mới'}</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="text-[10px] font-black uppercase text-amber-900 block mb-1">Vị Trí Ô (0 - 49):</label>
-                    <input 
-                      type="number" 
-                      min={0} 
-                      max={49}
-                      value={tileFormIndex}
-                      onChange={e => setTileFormIndex(parseInt(e.target.value) || 0)}
-                      className="w-full border-2 border-amber-200 p-2.5 rounded-xl font-bold text-xs bg-amber-50/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-black uppercase text-amber-900 block mb-1">Tên Ô Đặc Biệt:</label>
-                    <input 
-                      type="text" 
-                      placeholder="Ví dụ: Cổng Thần Tốc"
-                      value={tileFormTitle}
-                      onChange={e => setTileFormTitle(e.target.value)}
-                      className="w-full border-2 border-amber-200 p-2.5 rounded-xl font-bold text-xs bg-amber-50/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-black uppercase text-amber-900 block mb-1">Biểu Tượng Emoji:</label>
-                    <input 
-                      type="text" 
-                      placeholder="🚀"
-                      value={tileFormIcon}
-                      onChange={e => setTileFormIcon(e.target.value)}
-                      className="w-full border-2 border-amber-200 p-2.5 rounded-xl font-bold text-xs bg-amber-50/50"
-                    />
-                  </div>
+                  <input type="number" min={0} max={49} value={tileFormIndex} onChange={e => setTileFormIndex(parseInt(e.target.value) || 0)} className="w-full border-2 border-amber-200 p-2.5 rounded-xl font-bold text-xs bg-amber-50/50" />
+                  <input type="text" placeholder="Tên ô đặc biệt" value={tileFormTitle} onChange={e => setTileFormTitle(e.target.value)} className="w-full border-2 border-amber-200 p-2.5 rounded-xl font-bold text-xs bg-amber-50/50" />
+                  <input type="text" placeholder="🚀" value={tileFormIcon} onChange={e => setTileFormIcon(e.target.value)} className="w-full border-2 border-amber-200 p-2.5 rounded-xl font-bold text-xs bg-amber-50/50" />
                 </div>
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] font-black uppercase text-amber-900 block mb-1">Loại Hiệu Ứng:</label>
-                    <select
-                      value={tileFormType}
-                      onChange={e => setTileFormType(e.target.value as any)}
-                      className="w-full border-2 border-amber-200 p-2.5 rounded-xl font-bold text-xs bg-amber-50/50"
-                    >
-                      <option value="portal">🌀 Dịch Chuyển Tiến Bước (Portal)</option>
-                      <option value="curse">📜 Bùa Chú Đẩy Lùi (Curse)</option>
-                      <option value="monster">👹 Quái Vật Chặn Đường (Monster)</option>
-                      <option value="treasure">💎 Rương Báu Cộng Điểm (Treasure)</option>
-                      <option value="restart">🌀 Lùi Về Xuất Phát (Restart)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-black uppercase text-amber-900 block mb-1">Giá Trị Bước / Điểm (+/-):</label>
-                    <input 
-                      type="number" 
-                      value={tileFormValue}
-                      onChange={e => setTileFormValue(parseInt(e.target.value) || 0)}
-                      className="w-full border-2 border-amber-200 p-2.5 rounded-xl font-bold text-xs bg-amber-50/50"
-                    />
-                  </div>
+                  <select value={tileFormType} onChange={e => setTileFormType(e.target.value as any)} className="w-full border-2 border-amber-200 p-2.5 rounded-xl font-bold text-xs bg-amber-50/50">
+                    <option value="portal">🌀 Dịch Chuyển Tiến Bước</option>
+                    <option value="curse">📜 Bùa Chú Đẩy Lùi</option>
+                    <option value="monster">👹 Quái Vật Chặn Đường</option>
+                    <option value="treasure">💎 Rương Báu Cộng Điểm</option>
+                    <option value="restart">🌀 Lùi Về Xuất Phát</option>
+                  </select>
+                  <input type="number" value={tileFormValue} onChange={e => setTileFormValue(parseInt(e.target.value) || 0)} className="w-full border-2 border-amber-200 p-2.5 rounded-xl font-bold text-xs bg-amber-50/50" />
                 </div>
-
-                <div>
-                  <label className="text-[10px] font-black uppercase text-amber-900 block mb-1">Mô Tả Chi Tiết Hiệu Ứng:</label>
-                  <input 
-                    type="text" 
-                    placeholder="Mô tả khi dẫm vào ô..."
-                    value={tileFormDesc}
-                    onChange={e => setTileFormDesc(e.target.value)}
-                    className="w-full border-2 border-amber-200 p-2.5 rounded-xl font-bold text-xs bg-amber-50/50"
-                  />
-                </div>
-
+                <input type="text" placeholder="Mô tả khi dẫm vào ô..." value={tileFormDesc} onChange={e => setTileFormDesc(e.target.value)} className="w-full border-2 border-amber-200 p-2.5 rounded-xl font-bold text-xs bg-amber-50/50" />
                 <div className="flex gap-2">
-                  <button
-                    onClick={handleSaveCustomTile}
-                    className="bg-amber-600 hover:bg-amber-700 text-white font-black px-6 py-2.5 rounded-xl text-xs uppercase tracking-wider shadow"
-                  >
-                    {editingTileIndex !== null ? 'Cập Nhật Ô' : 'Lưu Ô Đặc Biệt'}
-                  </button>
-                  {editingTileIndex !== null && (
-                    <button
-                      onClick={resetTileForm}
-                      className="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold px-4 py-2.5 rounded-xl text-xs uppercase"
-                    >
-                      Hủy
-                    </button>
-                  )}
+                  <button onClick={handleSaveCustomTile} className="bg-amber-600 hover:bg-amber-700 text-white font-black px-6 py-2.5 rounded-xl text-xs uppercase tracking-wider shadow">{editingTileIndex !== null ? 'Cập Nhật Ô' : 'Lưu Ô Đặc Biệt'}</button>
+                  {editingTileIndex !== null && <button onClick={resetTileForm} className="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold px-4 py-2.5 rounded-xl text-xs uppercase">Hủy</button>}
                 </div>
               </div>
-
-              {/* Active Custom Tiles List */}
-              <div className="space-y-2">
-                <h4 className="font-black text-amber-950 text-xs uppercase">Danh Sách Ô Đặc Biệt Hiện Tại:</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
-                  {Object.values(customLudoTiles).sort((a, b) => a.tileIndex - b.tileIndex).map(tile => (
-                    <div key={tile.tileIndex} className="bg-white p-3 rounded-2xl border border-amber-200 shadow-xs flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-xl shrink-0">{tile.icon}</span>
-                        <div className="min-w-0">
-                          <p className="text-xs font-bold text-amber-950 truncate">Ô {tile.tileIndex}: {tile.title}</p>
-                          <p className="text-[9px] text-amber-800 truncate">{tile.desc}</p>
-                        </div>
-                      </div>
-                      <div className="flex gap-1 shrink-0">
-                        <button onClick={() => editCustomTile(tile)} className="text-amber-700 hover:bg-amber-100 p-1 rounded font-bold text-xs">✏️</button>
-                        <button onClick={() => deleteCustomTile(tile.tileIndex)} className="text-red-600 hover:bg-red-100 p-1 rounded font-bold text-xs">🗑️</button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
+                {Object.values(customLudoTiles).sort((a, b) => a.tileIndex - b.tileIndex).map(tile => (
+                  <div key={tile.tileIndex} className="bg-white p-3 rounded-2xl border border-amber-200 shadow-xs flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-xl shrink-0">{tile.icon}</span>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-amber-950 truncate">Ô {tile.tileIndex}: {tile.title}</p>
+                        <p className="text-[9px] text-amber-800 truncate">{tile.desc}</p>
                       </div>
                     </div>
-                  ))}
+                    <div className="flex gap-1 shrink-0">
+                      <button onClick={() => editCustomTile(tile)} className="text-amber-700 hover:bg-amber-100 p-1 rounded font-bold text-xs">✏️</button>
+                      <button onClick={() => deleteCustomTile(tile.tileIndex)} className="text-red-600 hover:bg-red-100 p-1 rounded font-bold text-xs">🗑️</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </SettingsSection>
+
+            <SettingsSection id="data" icon="☁️" title="Dữ Liệu Quốc Gia" subtitle="Import/export danh sách học sinh và JSON backup toàn bộ hệ thống." className="bg-red-50 p-6 sm:p-12 rounded-[50px] border-4 border-red-100 text-center space-y-8" collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
+              <div className="bg-white p-6 rounded-3xl border border-red-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="text-left space-y-1">
+                  <h4 className="font-bold text-red-950 text-sm">Danh Sách Học Sĩ (CSV / Excel)</h4>
+                  <p className="text-xs text-red-800/80 font-sans">Nhập danh sách học sinh từ bảng CSV.</p>
+                </div>
+                <div className="flex flex-wrap justify-center gap-4 shrink-0 font-sans">
+                  <button onClick={() => {
+                    const BOM = '\uFEFF';
+                    const csv = "Họ tên, Lớp, Số điểm hiện tại, Giới tính (Nam/Nữ)\nNguyễn Văn A, 10A1, 100, Nam\nTrần Thị B, 10A1, 80, Nữ";
+                    const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement("a");
+                    link.href = URL.createObjectURL(blob);
+                    link.setAttribute("download", "mau_csv_cung_dinh.csv");
+                    link.click();
+                  }} className="bg-white border-2 border-red-800 text-red-800 p-3 px-6 rounded-2xl font-bold hover:bg-red-800 hover:text-white transition-all text-xs shadow-md">Mẫu Excel 📥</button>
+                  <label className="bg-red-800 hover:bg-red-950 text-white p-3 px-6 rounded-2xl font-bold cursor-pointer transition-all text-xs shadow-md">
+                    Tải Lên Danh Sách 📤
+                    <input type="file" accept=".csv" onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        const text = event.target?.result as string;
+                        const lines = text.split('\n').filter(l => l.trim());
+                        const newItems: Student[] = lines.slice(1).map(line => {
+                          const [name, cls, pts, gender] = line.split(',').map(v => v.trim());
+                          const randomDexId = LIST_POKEMONS[Math.floor(Math.random() * LIST_POKEMONS.length)].dexId;
+                          return { id: Math.random().toString(36).substr(2, 9), name: name || 'Ẩn danh', className: cls || 'Học sĩ', points: parseInt(pts) || 0, gender: gender === 'Nữ' ? Gender.FEMALE : Gender.MALE, history: [], egg: { progress: 0, status: 'egg' as const, assignedDexId: randomDexId } };
+                        });
+                        setStudents(prev => [...prev, ...newItems]);
+                        alert("Đã tiếp nhận!");
+                      };
+                      reader.readAsText(file);
+                    }} className="hidden" />
+                  </label>
                 </div>
               </div>
-            </div>
-
-            <div className="bg-red-50 p-6 sm:p-12 rounded-[50px] border-4 border-red-100 text-center space-y-8">
-               <div className="space-y-2">
-                  <h3 className="text-2xl font-royal text-red-800">Dữ Liệu Quốc Gia</h3>
-                  <p className="text-xs text-red-700/60 font-medium">Bảo lưu thư tịch và quản lý danh tính sỹ phu toàn bộ hệ thống triều đình</p>
-               </div>
-
-               {/* Auto-Sync Explanation Card */}
-               <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-6 rounded-3xl border-2 border-amber-300 text-left space-y-3">
-                 <div className="flex items-center gap-3 border-b border-amber-200 pb-2">
-                   <span className="text-2xl">⚡☁️</span>
-                   <div>
-                     <h4 className="font-extrabold text-amber-950 text-sm uppercase">Cơ Chế & Tần Suất Sao Lưu Tự Động (Auto Cloud Sync)</h4>
-                     <p className="text-[11px] text-amber-800 font-medium">Chi tiết về tần suất, phương thức so sánh và bảo toàn dữ liệu của bạn</p>
-                   </div>
-                 </div>
-                 <div className="space-y-2.5 text-xs text-amber-900 leading-relaxed font-sans">
-                   <div className="flex items-start gap-2">
-                     <span className="font-black text-amber-800 shrink-0">⏱️ Tần suất sao lưu (Debounce 1.5s):</span>
-                     <span>Khi bạn chỉnh sửa dữ liệu (cộng/trừ điểm, thêm sỹ tử, thay đổi rank...), hệ thống đợi 1.5 giây sau thao tác cuối cùng để dồn tất cả thay đổi rồi mới thực hiện sao lưu. Giúp bạn thao tác điểm nhanh liên tục mà không lo giật lag.</span>
-                   </div>
-                   <div className="flex items-start gap-2">
-                     <span className="font-black text-amber-800 shrink-0">🛡️ Giữ nguyên data cũ (Differential Sync):</span>
-                     <span>Trước khi gửi dữ liệu lên Đám mây, hệ thống so sánh snapshot dữ liệu hiện tại với bản đã lưu gần nhất. Nếu <strong>không có thay đổi mới</strong>, hệ thống <strong>bỏ qua hoàn toàn (skip sync)</strong> và giữ nguyên bản sao cũ trên đám mây.</span>
-                   </div>
-                   <div className="flex items-start gap-2">
-                     <span className="font-black text-amber-800 shrink-0">✨ Chỉ cập nhật data mới:</span>
-                     <span>Chỉ khi phát hiện có dữ liệu mới hoặc chỉnh sửa mới, hệ thống mới tiến hành cập nhật hợp nhất (<code>merge: true</code>) dữ liệu mới vào tài khoản Đám mây của quý Quan trường.</span>
-                   </div>
-                 </div>
-               </div>
-               
-               {/* Excel section */}
-               <div className="bg-white p-6 rounded-3xl border border-red-100 flex flex-col sm:flex-row items-center justify-between gap-4">
-                 <div className="text-left space-y-1">
-                   <h4 className="font-bold text-red-950 text-sm">Danh Sách Học Sĩ (CSV / Excel)</h4>
-                   <p className="text-xs text-red-800/80 font-sans">Nhập hoặc làm trống danh sách triều học của bạn thông qua định dạng bảng tiêu chuẩn.</p>
-                 </div>
-                 <div className="flex flex-wrap justify-center gap-4 shrink-0 font-sans">
-                    <button onClick={() => {
-                      const BOM = '\uFEFF';
-                      const csv = "Họ tên, Lớp, Số điểm hiện tại, Giới tính (Nam/Nữ)\nNguyễn Văn A, 10A1, 100, Nam\nTrần Thị B, 10A1, 80, Nữ";
-                      const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
-                      const link = document.createElement("a");
-                      link.href = URL.createObjectURL(blob);
-                      link.setAttribute("download", "mau_csv_cung_dinh.csv");
-                      link.click();
-                    }} className="bg-white border-2 border-red-800 text-red-800 p-3 px-6 rounded-2xl font-bold hover:bg-red-800 hover:text-white transition-all text-xs shadow-md">Mẫu Excel 📥</button>
-                    <label className="bg-red-800 hover:bg-red-950 text-white p-3 px-6 rounded-2xl font-bold cursor-pointer transition-all text-xs shadow-md">
-                      Tải Lên Danh Sách 📤
-                      <input type="file" accept=".csv" onChange={e => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          const reader = new FileReader();
-                          reader.onload = (event) => {
-                            const text = event.target?.result as string;
-                            const lines = text.split('\n').filter(l => l.trim());
-                            const newItems: Student[] = lines.slice(1).map(line => {
-                              const [name, cls, pts, gender] = line.split(',').map(v => v.trim());
-                              const randomDexId = LIST_POKEMONS[Math.floor(Math.random() * LIST_POKEMONS.length)].dexId;
-                              return { 
-                                id: Math.random().toString(36).substr(2, 9), 
-                                name: name || 'Ẩn danh', 
-                                className: cls || 'Học sĩ', 
-                                points: parseInt(pts) || 0, 
-                                gender: gender === 'Nữ' ? Gender.FEMALE : Gender.MALE, 
-                                history: [],
-                                egg: {
-                                  progress: 0,
-                                  status: 'egg' as const,
-                                  assignedDexId: randomDexId
-                                }
-                              };
-                            });
-                            setStudents(prev => [...prev, ...newItems]);
-                            alert("Đã tiếp nhận!");
-                          };
-                          reader.readAsText(file);
-                      }} className="hidden" />
-                    </label>
-                 </div>
-               </div>
-
-               {/* Full Database Sync JSON Section */}
-               <div className="bg-white p-6 rounded-3xl border border-red-100 flex flex-col sm:flex-row items-center justify-between gap-4">
-                 <div className="text-left space-y-1">
-                   <h4 className="font-bold text-red-950 text-sm">Sao Lưu Toàn Bộ Hệ Thống (JSON Backup)</h4>
-                   <p className="text-xs text-red-800/80 font-sans">Trích xuất tất cả danh sách học sĩ, điểm số, lịch sử, linh thú, cài đặt công trạng, âm thanh và cấp bậc.</p>
-                 </div>
-                 <div className="flex flex-wrap justify-center gap-4 shrink-0 font-sans">
-                    <button 
-                      onClick={handleExportJSON}
-                      className="bg-[#D4AF37] hover:bg-amber-600 text-white p-3 px-6 rounded-2xl font-bold transition-all text-xs shadow-md"
-                    >
-                      Export JSON Backup 📦
-                    </button>
-                    <label className="bg-teal-700 hover:bg-teal-900 text-white p-3 px-6 rounded-2xl font-bold cursor-pointer transition-all text-xs shadow-md">
-                      Import JSON Restore 📥
-                      <input 
-                        type="file" 
-                        accept=".json" 
-                        onChange={handleImportJSON} 
-                        className="hidden" 
-                      />
-                    </label>
-                 </div>
-               </div>
-            </div>
+              <div className="bg-white p-6 rounded-3xl border border-red-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="text-left space-y-1">
+                  <h4 className="font-bold text-red-950 text-sm">Sao Lưu Toàn Bộ Hệ Thống (JSON Backup)</h4>
+                  <p className="text-xs text-red-800/80 font-sans">Bao gồm học sinh, điểm, lịch sử, linh thú, công trạng, Pokémon skills, âm thanh và cấp bậc.</p>
+                </div>
+                <div className="flex flex-wrap justify-center gap-4 shrink-0 font-sans">
+                  <button onClick={handleExportJSON} className="bg-[#D4AF37] hover:bg-amber-600 text-white p-3 px-6 rounded-2xl font-bold transition-all text-xs shadow-md">Export JSON Backup 📦</button>
+                  <label className="bg-teal-700 hover:bg-teal-900 text-white p-3 px-6 rounded-2xl font-bold cursor-pointer transition-all text-xs shadow-md">
+                    Import JSON Restore 📥
+                    <input type="file" accept=".json" onChange={handleImportJSON} className="hidden" />
+                  </label>
+                </div>
+              </div>
+            </SettingsSection>
           </div>
         )}
       </main>
@@ -3184,7 +3201,7 @@ const App: React.FC = () => {
                     <p className="text-[10px] font-black uppercase text-indigo-900 tracking-wider mb-2">⚡ Tuyệt Chiêu Pokémon Có Thể Kích Hoạt (Tối Đa 2 Lần):</p>
                     <div className="space-y-2 max-h-36 overflow-y-auto pr-1 custom-scrollbar">
                       {randomStudent.pet.skills.map(skId => {
-                        const sk = LIST_PET_SKILLS.find(x => x.id === skId);
+                        const sk = petSkills.find(x => x.id === skId);
                         if (!sk) return null;
                         const currentUses = randomStudent.pet?.skillUses?.[skId] || 0;
                         const remainingUses = Math.max(0, 2 - currentUses);
@@ -3264,9 +3281,8 @@ const App: React.FC = () => {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <button
                           onClick={() => {
-                            setLudoActiveStudent(battleResultSummary.studentA);
                             setShowRandomModal(false);
-                            setShowLudoModal(true);
+                            openLudoForClass(battleResultSummary.studentA.className, battleResultSummary.studentA);
                           }}
                           className="bg-amber-600 hover:bg-amber-700 text-white p-3 rounded-xl font-black text-xs uppercase tracking-wider shadow-md flex items-center justify-center gap-2 transition-all border-2 border-amber-400"
                         >
@@ -3274,9 +3290,8 @@ const App: React.FC = () => {
                         </button>
                         <button
                           onClick={() => {
-                            setLudoActiveStudent(battleResultSummary.studentB);
                             setShowRandomModal(false);
-                            setShowLudoModal(true);
+                            openLudoForClass(battleResultSummary.studentB.className, battleResultSummary.studentB);
                           }}
                           className="bg-purple-600 hover:bg-purple-700 text-white p-3 rounded-xl font-black text-xs uppercase tracking-wider shadow-md flex items-center justify-center gap-2 transition-all border-2 border-purple-400"
                         >
@@ -3539,7 +3554,7 @@ const App: React.FC = () => {
               <span className="text-3xl">🐴</span>
               <div>
                 <h2 className="text-xl font-royal uppercase tracking-widest text-amber-300">Đường Đua Cá Ngựa Triều Đình (50 Ô)</h2>
-                <p className="text-[10px] text-amber-200">Trả lời đúng câu hỏi -&gt; Lắc xí ngầu -&gt; Tiến bước nhận thưởng +20đ hào quang!</p>
+                <p className="text-[10px] text-amber-200">Lớp {activeLudoClassName || 'Chưa chọn'} - chỉ học sinh cùng lớp đua với nhau.</p>
               </div>
             </div>
             <button onClick={() => setShowLudoModal(false)} className="bg-amber-800 hover:bg-amber-700 text-white px-5 py-2 rounded-xl font-bold text-xs uppercase tracking-wider border border-amber-600">
@@ -3550,16 +3565,31 @@ const App: React.FC = () => {
           <div className="flex-1 p-4 overflow-y-auto max-w-7xl mx-auto w-full flex flex-col lg:flex-row gap-6">
             {/* Left side: Interactive Board */}
             <div className="flex-1 bg-white p-6 rounded-3xl border-4 border-amber-300 shadow-xl space-y-6">
-              <div className="flex justify-between items-center border-b border-amber-200 pb-3">
+              <div className="flex flex-col sm:flex-row justify-between gap-3 sm:items-center border-b border-amber-200 pb-3">
                 <h3 className="font-extrabold text-amber-950 text-base">Bàn Cờ Hoàng Gia (Ô 0 đến 49)</h3>
-                <span className="text-xs font-bold text-amber-800 bg-amber-100 px-3 py-1 rounded-full">Tổng sỹ tử: {presentStudents.length}</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={activeLudoClassName}
+                    onChange={e => {
+                      setLudoClassName(e.target.value);
+                      setLudoActiveStudent(null);
+                      setLudoDice(null);
+                    }}
+                    className="bg-amber-100 text-amber-950 border border-amber-300 px-3 py-1.5 rounded-xl text-xs font-black outline-none"
+                  >
+                    {classOptions.map(cls => (
+                      <option key={cls} value={cls}>{cls}</option>
+                    ))}
+                  </select>
+                  <span className="text-xs font-bold text-amber-800 bg-amber-100 px-3 py-1 rounded-full">Tổng sỹ tử: {ludoRaceStudents.length}</span>
+                </div>
               </div>
 
               {/* Grid of 50 tiles */}
               <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
                 {Array.from({ length: 50 }).map((_, tileIdx) => {
                   const spec = customLudoTiles[tileIdx] || DEFAULT_LUDO_TILES[tileIdx];
-                  const studentsOnTile = presentStudents.filter(s => (ludoPositions[s.id] || 0) === tileIdx);
+                  const studentsOnTile = ludoRaceStudents.filter(s => (ludoPositions[s.id] || 0) === tileIdx);
 
                   return (
                     <div 
@@ -3630,13 +3660,13 @@ const App: React.FC = () => {
                   <select 
                     value={ludoActiveStudent?.id || ''} 
                     onChange={e => {
-                      const st = presentStudents.find(s => s.id === e.target.value) || null;
+                      const st = ludoRaceStudents.find(s => s.id === e.target.value) || null;
                       setLudoActiveStudent(st);
                     }}
                     className="w-full border-2 border-amber-300 p-3 rounded-2xl text-sm font-bold outline-none bg-amber-50/50"
                   >
                     <option value="">-- Chọn học sinh lắc xí ngầu --</option>
-                    {presentStudents.map(s => (
+                    {ludoRaceStudents.map(s => (
                       <option key={s.id} value={s.id}>{s.name} ({s.className}) - Ô {ludoPositions[s.id] || 0}</option>
                     ))}
                   </select>

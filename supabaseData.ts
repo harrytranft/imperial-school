@@ -1,11 +1,13 @@
 import { supabase } from './supabaseClient';
 import { RankInfo, Skill, Student, LudoTileSpec } from './types';
+import { PetSkill } from './pokemonData';
 
 export interface UserSettingsData {
   students: Student[];
   ranksMale: RankInfo[];
   ranksFemale: RankInfo[];
   skills: Skill[];
+  petSkills?: PetSkill[];
   posSoundUrl: string;
   negSoundUrl: string;
   timerSoundUrl: string;
@@ -50,6 +52,7 @@ export const fetchUserSettings = async (userId: string): Promise<UserSettingsDat
     ranksMale: Array.isArray(data.ranks_male) ? data.ranks_male : [],
     ranksFemale: Array.isArray(data.ranks_female) ? data.ranks_female : [],
     skills: Array.isArray(data.skills) ? data.skills : [],
+    petSkills: Array.isArray(data.pet_skills) ? data.pet_skills : undefined,
     posSoundUrl: data.pos_sound_url || '',
     negSoundUrl: data.neg_sound_url || '',
     timerSoundUrl: data.timer_sound_url || '',
@@ -68,6 +71,7 @@ export const upsertUserSettings = async (userId: string, settings: UserSettingsD
       ranks_male: sanitizeForSupabase(settings.ranksMale || []),
       ranks_female: sanitizeForSupabase(settings.ranksFemale || []),
       skills: sanitizeForSupabase(settings.skills || []),
+      pet_skills: sanitizeForSupabase(settings.petSkills || []),
       pos_sound_url: settings.posSoundUrl || '',
       neg_sound_url: settings.negSoundUrl || '',
       timer_sound_url: settings.timerSoundUrl || '',
