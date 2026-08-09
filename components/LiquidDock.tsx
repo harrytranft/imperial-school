@@ -14,6 +14,7 @@ interface DockItem {
 interface LiquidDockProps {
   onRandom: () => void;
   onLudo: () => void;
+  onLuckyWheel: () => void;
   onGroup: () => void;
   onTimer: () => void;
   onSelectAll: () => void;
@@ -31,6 +32,7 @@ interface LiquidDockProps {
 export const LiquidDock: React.FC<LiquidDockProps> = ({
   onRandom,
   onLudo,
+  onLuckyWheel,
   onGroup,
   onTimer,
   onSelectAll,
@@ -61,6 +63,13 @@ export const LiquidDock: React.FC<LiquidDockProps> = ({
       icon: '🐴',
       onClick: onLudo,
       color: 'from-amber-300 via-amber-500 to-orange-600',
+    },
+    {
+      id: 'lucky-wheel',
+      label: 'Vòng quay may mắn',
+      icon: '🎡',
+      onClick: onLuckyWheel,
+      color: 'from-rose-400 via-fuchsia-500 to-purple-700',
     },
     {
       id: 'group',

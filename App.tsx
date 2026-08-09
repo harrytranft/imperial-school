@@ -17,6 +17,59 @@ import { fetchUserSettings, upsertUserSettings } from './supabaseData';
 
 type Screen = 'school' | 'class' | 'profile' | 'settings';
 
+type LuckyWheelRewardType = 'points' | 'pokemon' | 'skill' | 'hp';
+
+interface LuckyWheelReward {
+  id: string;
+  label: string;
+  icon: string;
+  type: LuckyWheelRewardType;
+  amount?: number;
+  color: string;
+}
+
+interface LuckyWheelResult {
+  student: Student;
+  reward: LuckyWheelReward;
+  pokemon?: PokemonPet;
+  skill?: PetSkill;
+  hpDelta?: number;
+  message: string;
+}
+
+const LUCKY_WHEEL_REWARDS: LuckyWheelReward[] = [
+  ...Array.from({ length: 10 }, (_, idx) => ({
+    id: `points_plus_${idx + 1}`,
+    label: `Cộng ${idx + 1} điểm`,
+    icon: '✨',
+    type: 'points' as const,
+    amount: idx + 1,
+    color: idx % 2 === 0 ? '#16a34a' : '#22c55e'
+  })),
+  ...Array.from({ length: 10 }, (_, idx) => ({
+    id: `points_minus_${idx + 1}`,
+    label: `Trừ ${idx + 1} điểm`,
+    icon: '⚡',
+    type: 'points' as const,
+    amount: -(idx + 1),
+    color: idx % 2 === 0 ? '#dc2626' : '#f97316'
+  })),
+  { id: 'pokemon_gift_1', label: 'Tặng Pokemon', icon: '🎁', type: 'pokemon', color: '#f59e0b' },
+  { id: 'pokemon_gift_2', label: 'Tặng Pokemon hiếm', icon: '🥚', type: 'pokemon', color: '#d97706' },
+  { id: 'pokemon_gift_3', label: 'Tặng Pokemon mới', icon: '🌟', type: 'pokemon', color: '#fbbf24' },
+  { id: 'skill_gift_1', label: 'Tặng skill Pokemon', icon: '📜', type: 'skill', color: '#7c3aed' },
+  { id: 'skill_gift_2', label: 'Tặng bí kíp Pet', icon: '🔮', type: 'skill', color: '#9333ea' },
+  { id: 'skill_gift_3', label: 'Tặng tuyệt chiêu', icon: '💫', type: 'skill', color: '#a855f7' },
+  { id: 'hp_plus_5', label: 'Cộng 5 HP', icon: '❤️', type: 'hp', amount: 5, color: '#059669' },
+  { id: 'hp_plus_10', label: 'Cộng 10 HP', icon: '💚', type: 'hp', amount: 10, color: '#10b981' },
+  { id: 'hp_plus_15', label: 'Cộng 15 HP', icon: '💖', type: 'hp', amount: 15, color: '#34d399' },
+  { id: 'hp_plus_20', label: 'Cộng 20 HP', icon: '💎', type: 'hp', amount: 20, color: '#2dd4bf' },
+  { id: 'hp_minus_5', label: 'Trừ 5 HP', icon: '💔', type: 'hp', amount: -5, color: '#be123c' },
+  { id: 'hp_minus_10', label: 'Trừ 10 HP', icon: '🩹', type: 'hp', amount: -10, color: '#e11d48' },
+  { id: 'hp_minus_15', label: 'Trừ 15 HP', icon: '🔥', type: 'hp', amount: -15, color: '#ea580c' },
+  { id: 'hp_minus_20', label: 'Trừ 20 HP', icon: '🌩️', type: 'hp', amount: -20, color: '#b91c1c' }
+];
+
 const AuthLoginForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
   const { loginWithEmail, signUpWithEmail } = useAuth();
   const [authTab, setAuthTab] = useState<'login' | 'register'>('login');
@@ -257,6 +310,14 @@ const App: React.FC = () => {
     resultMsg: string;
   } | null>(null);
   const [uncalledMap, setUncalledMap] = useState<Record<string, string[]>>({}); // Fair round-robin random queue
+
+  // Lucky Wheel State
+  const [showLuckyWheelModal, setShowLuckyWheelModal] = useState(false);
+  const [isLuckyWheelSpinning, setIsLuckyWheelSpinning] = useState(false);
+  const [luckyWheelRotation, setLuckyWheelRotation] = useState(0);
+  const [luckyWheelResult, setLuckyWheelResult] = useState<LuckyWheelResult | null>(null);
+  const [luckyWheelPendingResult, setLuckyWheelPendingResult] = useState<LuckyWheelResult | null>(null);
+  const [luckyWheelCandidateIds, setLuckyWheelCandidateIds] = useState<string[]>([]);
 
   // Cá Ngựa / Ludo Game State
   const [showLudoModal, setShowLudoModal] = useState(false);
@@ -684,6 +745,10 @@ const App: React.FC = () => {
 
   const presentStudents = useMemo(() => currentClassStudents.filter(s => !s.isAbsent), [currentClassStudents]);
   const classOptions = useMemo(() => classes.filter(c => c !== 'Tất cả'), [classes]);
+  const luckyWheelBackground = useMemo(() => {
+    const sliceSize = 100 / LUCKY_WHEEL_REWARDS.length;
+    return `conic-gradient(${LUCKY_WHEEL_REWARDS.map((reward, idx) => `${reward.color} ${idx * sliceSize}% ${(idx + 1) * sliceSize}%`).join(', ')})`;
+  }, []);
   const activeLudoClassName = ludoClassName || (filterClass !== 'Tất cả' ? filterClass : classOptions[0] || '');
   const ludoRaceStudents = useMemo(() => {
     if (!activeLudoClassName) return [];
@@ -1264,6 +1329,198 @@ const App: React.FC = () => {
     }
 
     setShowRandomModal(true);
+  };
+
+  const getLuckyWheelValidRewards = (student: Student) => {
+    const ownedSkillIds = student.pet?.skills || [];
+    return LUCKY_WHEEL_REWARDS.filter(reward => {
+      if (reward.type === 'hp') return !!student.pet;
+      if (reward.type === 'skill') {
+        return !!student.pet && petSkills.some(sk => !ownedSkillIds.includes(sk.id));
+      }
+      return true;
+    });
+  };
+
+  const prepareLuckyWheelResult = (student: Student, reward: LuckyWheelReward): LuckyWheelResult => {
+    if (reward.type === 'pokemon') {
+      const randomPokemon = getRandomPokemon();
+      const giftedPet: PokemonPet = {
+        dexId: randomPokemon.dexId,
+        name: randomPokemon.name,
+        types: randomPokemon.types,
+        hp: 100,
+        accessories: [],
+        skills: [],
+        baseDexId: randomPokemon.dexId
+      };
+      return {
+        student,
+        reward,
+        pokemon: giftedPet,
+        message: `${student.name} nhận được Pokémon ${giftedPet.name}!`
+      };
+    }
+
+    if (reward.type === 'skill' && student.pet) {
+      const ownedSkillIds = student.pet.skills || [];
+      const availableSkills = petSkills.filter(sk => !ownedSkillIds.includes(sk.id));
+      const giftedSkill = availableSkills[Math.floor(Math.random() * availableSkills.length)];
+      return {
+        student,
+        reward,
+        skill: giftedSkill,
+        message: `${student.name} nhận thêm tuyệt chiêu ${giftedSkill.name} cho ${student.pet.name}!`
+      };
+    }
+
+    if (reward.type === 'hp') {
+      const hpDelta = reward.amount || 0;
+      return {
+        student,
+        reward,
+        hpDelta,
+        message: hpDelta >= 0
+          ? `Pokémon của ${student.name} hồi ${hpDelta} HP!`
+          : `Pokémon của ${student.name} bị trừ ${Math.abs(hpDelta)} HP!`
+      };
+    }
+
+    const pointAmount = reward.amount || 0;
+    return {
+      student,
+      reward,
+      message: `${student.name} ${pointAmount >= 0 ? 'được cộng' : 'bị trừ'} ${Math.abs(pointAmount)} điểm Hào quang!`
+    };
+  };
+
+  const updateActivePetInCollection = (student: Student, nextPet: PokemonPet) => {
+    if (!student.pet || !student.pets) return student.pets;
+    return student.pets.map(p =>
+      p.dexId === student.pet!.dexId && p.name === student.pet!.name ? nextPet : p
+    );
+  };
+
+  const applyLuckyWheelReward = async (result: LuckyWheelResult) => {
+    const reward = result.reward;
+
+    if (reward.type === 'points') {
+      await handleUpdatePoints([result.student.id], reward.amount || 0, `🎡 Vòng quay may mắn: ${reward.label}`);
+      setLuckyWheelResult(result);
+      setIsLuckyWheelSpinning(false);
+      return;
+    }
+
+    const isPositiveReward = reward.type !== 'hp' || (result.hpDelta || 0) >= 0;
+
+    setStudents(prev => {
+      let updatedTarget: Student | null = null;
+
+      const nextStudents = prev.map(s => {
+        if (s.id !== result.student.id) return s;
+
+        const historyItem: HistoryItem = {
+          id: Date.now().toString() + Math.random(),
+          amount: 0,
+          reason: `🎡 Vòng quay may mắn: ${result.message}`,
+          timestamp: Date.now()
+        };
+
+        if (reward.type === 'pokemon' && result.pokemon) {
+          const currentPets = s.pets ? [...s.pets] : [];
+          if (s.pet && !currentPets.some(p => p.dexId === s.pet!.dexId && p.name === s.pet!.name)) {
+            currentPets.push(s.pet);
+          }
+          const updatedS: Student = {
+            ...s,
+            pet: result.pokemon,
+            pets: [result.pokemon, ...currentPets],
+            history: [historyItem, ...s.history].slice(0, 50)
+          };
+          updatedTarget = updatedS;
+          return updatedS;
+        }
+
+        if (reward.type === 'skill' && result.skill && s.pet) {
+          const currentUses = s.pet.skillUses ? { ...s.pet.skillUses } : {};
+          currentUses[result.skill.id] = 0;
+          const updatedPet: PokemonPet = {
+            ...s.pet,
+            skills: [...(s.pet.skills || []), result.skill.id],
+            skillUses: currentUses
+          };
+          const updatedS: Student = {
+            ...s,
+            pet: updatedPet,
+            pets: updateActivePetInCollection(s, updatedPet),
+            history: [historyItem, ...s.history].slice(0, 50)
+          };
+          updatedTarget = updatedS;
+          return updatedS;
+        }
+
+        if (reward.type === 'hp' && s.pet) {
+          const currentHp = s.pet.hp ?? 100;
+          const nextHp = Math.min(100, Math.max(0, currentHp + (result.hpDelta || 0)));
+          const updatedPet: PokemonPet = {
+            ...s.pet,
+            hp: nextHp
+          };
+          const updatedS: Student = {
+            ...s,
+            pet: updatedPet,
+            pets: updateActivePetInCollection(s, updatedPet),
+            history: [historyItem, ...s.history].slice(0, 50)
+          };
+          updatedTarget = updatedS;
+          return updatedS;
+        }
+
+        return s;
+      });
+
+      if (updatedTarget && editingStudent?.id === updatedTarget.id) {
+        setEditingStudent(updatedTarget);
+      }
+
+      return nextStudents;
+    });
+
+    new Audio(isPositiveReward ? posSoundUrl : negSoundUrl).play().catch(() => {});
+    setSelectedStudentIds([]);
+    setIsMultiSelectMode(false);
+    setLuckyWheelResult(result);
+    setIsLuckyWheelSpinning(false);
+  };
+
+  const handleOpenLuckyWheel = () => {
+    if (isLuckyWheelSpinning) return;
+
+    const candidates = students.filter(s => selectedStudentIds.includes(s.id) && !s.isAbsent);
+    if (candidates.length === 0) {
+      alert("Vui lòng chọn ít nhất 1 học sinh đang hiện diện để quay Vòng quay may mắn.");
+      return;
+    }
+
+    const chosenStudent = candidates[Math.floor(Math.random() * candidates.length)];
+    const validRewards = getLuckyWheelValidRewards(chosenStudent);
+    const chosenReward = validRewards[Math.floor(Math.random() * validRewards.length)];
+    const preparedResult = prepareLuckyWheelResult(chosenStudent, chosenReward);
+    const rewardIndex = Math.max(0, LUCKY_WHEEL_REWARDS.findIndex(reward => reward.id === chosenReward.id));
+    const segmentSize = 360 / LUCKY_WHEEL_REWARDS.length;
+    const targetCenter = rewardIndex * segmentSize + segmentSize / 2;
+    const finalRotation = Math.ceil(luckyWheelRotation / 360) * 360 + 1800 + (360 - targetCenter);
+
+    setLuckyWheelCandidateIds(candidates.map(s => s.id));
+    setLuckyWheelPendingResult(preparedResult);
+    setLuckyWheelResult(null);
+    setShowLuckyWheelModal(true);
+    setIsLuckyWheelSpinning(true);
+    setLuckyWheelRotation(finalRotation);
+
+    window.setTimeout(() => {
+      applyLuckyWheelReward(preparedResult);
+    }, 2400);
   };
 
   const handleResolveBattle = () => {
@@ -1965,8 +2222,9 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_50%_0%,#fffbf2_0%,#f5ebe0_100%)] pb-32">
       {/* NAVIGATION BAR */}
-      <nav className="sticky top-0 z-40 p-3 sm:p-4 backdrop-blur-xl bg-gradient-to-r from-red-950/95 via-red-900/95 to-amber-950/95 border-b-2 border-amber-400/50 shadow-[0_10px_30px_rgba(0,0,0,0.3)]">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
+      <div className="fixed top-0 left-0 right-0 z-40 h-5 group/nav">
+        <nav className="absolute top-0 left-0 right-0 p-3 sm:p-4 backdrop-blur-xl bg-gradient-to-r from-red-950/95 via-red-900/95 to-amber-950/95 border-b-2 border-amber-400/50 shadow-[0_10px_30px_rgba(0,0,0,0.3)] -translate-y-full group-hover/nav:translate-y-0 focus-within:translate-y-0 transition-transform duration-300 ease-out">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
           
           {/* Left: Brand */}
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setCurrentScreen('school')}>
@@ -2075,8 +2333,9 @@ const App: React.FC = () => {
             </button>
           </div>
 
-        </div>
-      </nav>
+          </div>
+        </nav>
+      </div>
 
       {/* MAIN CONTENT */}
       <main className="max-w-7xl mx-auto p-6">
@@ -2176,6 +2435,7 @@ const App: React.FC = () => {
             <LiquidDock
               onRandom={handleRandom}
               onLudo={() => openLudoForClass()}
+              onLuckyWheel={handleOpenLuckyWheel}
               onGroup={() => setShowGroupModal(true)}
               onTimer={() => setShowTimerModal(true)}
               onSelectAll={handleToggleSelectAll}
@@ -3404,6 +3664,157 @@ const App: React.FC = () => {
                 </button>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: LUCKY WHEEL */}
+      {showLuckyWheelModal && (
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isLuckyWheelSpinning) setShowLuckyWheelModal(false);
+          }}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md overflow-y-auto"
+        >
+          <div className="bg-white w-full max-w-5xl rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in duration-300 relative border-4 border-fuchsia-700 my-auto">
+            <button
+              onClick={() => !isLuckyWheelSpinning && setShowLuckyWheelModal(false)}
+              disabled={isLuckyWheelSpinning}
+              className="absolute top-5 right-5 text-3xl text-white/70 hover:text-white disabled:opacity-30 transition-colors z-20"
+            >
+              &times;
+            </button>
+
+            <div className="bg-gradient-to-r from-red-950 via-fuchsia-900 to-purple-950 text-white p-6 sm:p-8">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-3xl bg-white/15 border border-white/30 flex items-center justify-center text-4xl shadow-inner">
+                  🎡
+                </div>
+                <div>
+                  <h2 className="text-2xl sm:text-3xl font-royal uppercase tracking-wider text-amber-200">Vòng Quay May Mắn</h2>
+                  <p className="text-xs sm:text-sm text-fuchsia-100 font-bold mt-1">
+                    {isLuckyWheelSpinning ? 'Đang chọn 1 học sĩ và 1 phần thưởng...' : 'Mỗi lượt chỉ có 1 học sĩ nhận 1 phần thưởng duy nhất.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_0.9fr] gap-8 p-6 sm:p-8 bg-gradient-to-br from-fuchsia-50 via-white to-amber-50">
+              <div className="flex flex-col items-center justify-center gap-6">
+                <div className="relative w-[min(82vw,380px)] aspect-square">
+                  <div className="absolute -top-2 left-1/2 -translate-x-1/2 z-30 w-0 h-0 border-l-[16px] border-r-[16px] border-t-[34px] border-l-transparent border-r-transparent border-t-red-800 drop-shadow-lg" />
+                  <div
+                    className="absolute inset-0 rounded-full border-[10px] border-amber-300 shadow-2xl overflow-hidden transition-transform duration-[2400ms] ease-out"
+                    style={{
+                      background: luckyWheelBackground,
+                      transform: `rotate(${luckyWheelRotation}deg)`
+                    }}
+                  >
+                    {LUCKY_WHEEL_REWARDS.map((reward, idx) => {
+                      const angle = idx * (360 / LUCKY_WHEEL_REWARDS.length) + (180 / LUCKY_WHEEL_REWARDS.length);
+                      const label = reward.type === 'points' || reward.type === 'hp'
+                        ? `${reward.icon}${reward.amount && reward.amount > 0 ? '+' : ''}${reward.amount}`
+                        : reward.icon;
+                      return (
+                        <span
+                          key={reward.id}
+                          className="absolute left-1/2 top-1/2 text-[10px] sm:text-xs font-black text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.7)] select-none"
+                          style={{
+                            transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(calc(-1 * min(34vw, 150px))) rotate(${-angle}deg)`
+                          }}
+                        >
+                          {label}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <div className="absolute inset-[35%] rounded-full bg-white border-8 border-amber-300 shadow-xl flex items-center justify-center text-5xl z-20">
+                    {isLuckyWheelSpinning ? '🎲' : (luckyWheelResult?.reward.icon || luckyWheelPendingResult?.reward.icon || '🎡')}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 w-full max-w-xl text-[10px] font-black uppercase tracking-wide">
+                  <div className="bg-emerald-100 text-emerald-800 rounded-2xl px-3 py-2 text-center">+ Điểm tối đa 10</div>
+                  <div className="bg-red-100 text-red-800 rounded-2xl px-3 py-2 text-center">- Điểm tối đa 10</div>
+                  <div className="bg-amber-100 text-amber-900 rounded-2xl px-3 py-2 text-center">Tặng Pokemon</div>
+                  <div className="bg-purple-100 text-purple-900 rounded-2xl px-3 py-2 text-center">Tặng Skill</div>
+                  <div className="bg-teal-100 text-teal-900 rounded-2xl px-3 py-2 text-center">Cộng HP</div>
+                  <div className="bg-rose-100 text-rose-900 rounded-2xl px-3 py-2 text-center">Trừ HP</div>
+                </div>
+              </div>
+
+              <div className="space-y-5">
+                <div className="bg-white/90 rounded-3xl border border-fuchsia-100 p-5 shadow-sm">
+                  <p className="text-[10px] font-black uppercase tracking-[0.25em] text-fuchsia-900 mb-3">Danh sách được quay</p>
+                  <div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto custom-scrollbar pr-1">
+                    {luckyWheelCandidateIds.map(id => {
+                      const candidate = students.find(s => s.id === id);
+                      if (!candidate) return null;
+                      return (
+                        <span key={id} className="bg-fuchsia-50 border border-fuchsia-200 text-fuchsia-950 px-3 py-1.5 rounded-full text-xs font-black">
+                          {candidate.name}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-[32px] border-2 border-amber-200 p-6 min-h-[320px] flex flex-col items-center justify-center text-center shadow-xl">
+                  {isLuckyWheelSpinning && (
+                    <div className="space-y-4 animate-pulse">
+                      <div className="text-6xl">🎡</div>
+                      <h3 className="text-2xl font-royal text-fuchsia-900 uppercase">Đang quay...</h3>
+                      <p className="text-sm font-bold text-gray-500">Triều đình đang rút vận may, chờ bánh xe dừng hẳn nhé.</p>
+                    </div>
+                  )}
+
+                  {!isLuckyWheelSpinning && luckyWheelResult && (
+                    <div className="w-full space-y-5 animate-in zoom-in-95 duration-300">
+                      <div className="flex flex-col items-center gap-3">
+                        <img
+                          src={luckyWheelResult.student.customAvatar || getRank(luckyWheelResult.student.points, luckyWheelResult.student.gender).avatar || 'https://api.dicebear.com/7.x/bottts/svg'}
+                          className="w-24 h-24 rounded-full border-4 border-fuchsia-700 object-cover shadow-xl"
+                        />
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.25em] text-fuchsia-700">Học sĩ trúng thưởng</p>
+                          <h3 className="text-3xl font-black text-gray-900">{luckyWheelResult.student.name}</h3>
+                          <p className="text-xs font-bold text-gray-400 uppercase">{luckyWheelResult.student.className}</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-gradient-to-br from-amber-50 to-fuchsia-50 rounded-3xl border border-amber-200 p-5">
+                        <div className="text-5xl mb-2">{luckyWheelResult.reward.icon}</div>
+                        <p className="text-xl font-black text-fuchsia-950">{luckyWheelResult.reward.label}</p>
+                        <p className="mt-2 text-sm font-bold text-gray-700">{luckyWheelResult.message}</p>
+
+                        {luckyWheelResult.pokemon && (
+                          <img
+                            referrerPolicy="no-referrer"
+                            src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${luckyWheelResult.pokemon.dexId}.png`}
+                            className="w-28 h-28 object-contain mx-auto mt-3 drop-shadow"
+                            alt={luckyWheelResult.pokemon.name}
+                          />
+                        )}
+
+                        {luckyWheelResult.skill && (
+                          <div className="mt-3 inline-flex items-center gap-2 bg-white border border-purple-200 rounded-2xl px-4 py-2 text-purple-950 font-black text-sm">
+                            <span className="text-2xl">{luckyWheelResult.skill.icon}</span>
+                            <span>{luckyWheelResult.skill.name}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={() => setShowLuckyWheelModal(false)}
+                        className="w-full bg-fuchsia-800 hover:bg-fuchsia-900 text-white py-3.5 rounded-2xl font-black uppercase tracking-wider shadow-lg transition-all"
+                      >
+                        Hoàn tất
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
