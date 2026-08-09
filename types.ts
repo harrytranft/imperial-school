@@ -54,6 +54,17 @@ export interface LudoTileSpec {
   value?: number; // e.g. +3 steps, -5 steps, +5 pts, restart
 }
 
+export type LuckyWheelRewardType = 'points' | 'pokemon' | 'skill' | 'hp' | 'ludo_rolls';
+
+export interface LuckyWheelReward {
+  id: string;
+  label: string;
+  icon: string;
+  type: LuckyWheelRewardType;
+  amount?: number;
+  color: string;
+}
+
 export interface RankInfo {
   id: string;
   level: number;

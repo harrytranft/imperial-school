@@ -23,11 +23,18 @@
 - Removed the top clock/date display and returned the main navbar to a normal sticky bar.
 - Removed the imperial accessory shop from the student profile; Pokémon progression now focuses on skills only.
 - Added a dedicated `Hợp nhất Linh thú` profile tab for merging exactly 2 Pokémon into a new one while preserving still-active purchased skills.
+- Added HP defeat handling: when a Pokémon reaches 0 HP, it is removed from the student's owned Pokémon, a release modal is shown, and the student can choose another companion or open the egg screen.
+- Reworked Lucky Wheel so it opens first, starts only after pressing the spin button, runs a 10-second slow-fast-slow animation, and plays separate spin/finish sounds.
+- Made Lucky Wheel rewards use random selection from customizable reward data instead of a fixed deterministic flow.
+- Added glowy lottery-style Lucky Wheel visuals with larger reward labels and result text.
+- Added Lucky Wheel reward type for bonus Cá Ngựa dice rolls from 1 to 5.
+- Added Cá Ngựa bonus roll tracking so Lucky Wheel bonus rolls can be consumed without awarding the normal +1 answer point.
+- Added Lucky Wheel sound URLs and customizable rewards/penalties to Settings, local storage, JSON backup, and Supabase sync.
 
 ## Manual Steps Needed
 
 1. In Supabase, open SQL Editor and run the full contents of `supabase-schema.sql`.
-   - If you already ran the older schema, run it again so `user_settings.pet_skills` is added.
+   - If you already ran the older schema, run it again so `user_settings.pet_skills`, `wheel_spin_sound_url`, `wheel_finish_sound_url`, and `lucky_wheel_rewards` are added.
 2. In Supabase Auth, make sure Email login is enabled.
 3. If users cannot log in right after signing up, either confirm their email from the Supabase email, or disable required email confirmation for development/testing.
 4. In Supabase Auth URL settings, add your deployed Vercel domain as an allowed site/redirect URL. Add `http://localhost:3000` too if you test locally.

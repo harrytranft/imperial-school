@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { RankInfo, Skill, Student, LudoTileSpec } from './types';
+import { LuckyWheelReward, RankInfo, Skill, Student, LudoTileSpec } from './types';
 import { PetSkill } from './pokemonData';
 
 export interface UserSettingsData {
@@ -11,7 +11,10 @@ export interface UserSettingsData {
   posSoundUrl: string;
   negSoundUrl: string;
   timerSoundUrl: string;
+  wheelSpinSoundUrl?: string;
+  wheelFinishSoundUrl?: string;
   customLudoTiles?: Record<number, LudoTileSpec>;
+  luckyWheelRewards?: LuckyWheelReward[];
   updatedAt?: number;
 }
 
@@ -56,7 +59,10 @@ export const fetchUserSettings = async (userId: string): Promise<UserSettingsDat
     posSoundUrl: data.pos_sound_url || '',
     negSoundUrl: data.neg_sound_url || '',
     timerSoundUrl: data.timer_sound_url || '',
+    wheelSpinSoundUrl: data.wheel_spin_sound_url || '',
+    wheelFinishSoundUrl: data.wheel_finish_sound_url || '',
     customLudoTiles: data.custom_ludo_tiles || {},
+    luckyWheelRewards: Array.isArray(data.lucky_wheel_rewards) ? data.lucky_wheel_rewards : undefined,
     updatedAt: data.updated_at_ms || undefined
   };
 };
@@ -75,7 +81,10 @@ export const upsertUserSettings = async (userId: string, settings: UserSettingsD
       pos_sound_url: settings.posSoundUrl || '',
       neg_sound_url: settings.negSoundUrl || '',
       timer_sound_url: settings.timerSoundUrl || '',
+      wheel_spin_sound_url: settings.wheelSpinSoundUrl || '',
+      wheel_finish_sound_url: settings.wheelFinishSoundUrl || '',
       custom_ludo_tiles: sanitizeForSupabase(settings.customLudoTiles || {}),
+      lucky_wheel_rewards: sanitizeForSupabase(settings.luckyWheelRewards || []),
       updated_at_ms: updatedAt,
       updated_at: new Date(updatedAt).toISOString()
     }, { onConflict: 'user_id' });

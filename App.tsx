@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Student, Gender, HistoryItem, RankInfo, Skill, PokemonPet, LudoTileSpec } from './types';
+import { Student, Gender, HistoryItem, RankInfo, Skill, PokemonPet, LudoTileSpec, LuckyWheelReward, LuckyWheelRewardType } from './types';
 import { 
   STORAGE_KEY, DEFAULT_RANKS_MALE, DEFAULT_RANKS_FEMALE, 
   RANKS_KEY_MALE, RANKS_KEY_FEMALE, DEFAULT_SKILLS, SKILLS_KEY,
-  DEFAULT_LUDO_TILES, PET_SKILLS_KEY
+  DEFAULT_LUDO_TILES, PET_SKILLS_KEY, DEFAULT_LUCKY_WHEEL_REWARDS,
+  LUCKY_WHEEL_REWARDS_KEY, WHEEL_SPIN_SOUND_KEY, WHEEL_FINISH_SOUND_KEY
 } from './constants';
 import { StudentCard } from './components/StudentCard';
 import { LiquidDock } from './components/LiquidDock';
@@ -17,17 +18,6 @@ import { fetchUserSettings, upsertUserSettings } from './supabaseData';
 
 type Screen = 'school' | 'class' | 'profile' | 'settings';
 
-type LuckyWheelRewardType = 'points' | 'pokemon' | 'skill' | 'hp';
-
-interface LuckyWheelReward {
-  id: string;
-  label: string;
-  icon: string;
-  type: LuckyWheelRewardType;
-  amount?: number;
-  color: string;
-}
-
 interface LuckyWheelResult {
   student: Student;
   reward: LuckyWheelReward;
@@ -37,38 +27,12 @@ interface LuckyWheelResult {
   message: string;
 }
 
-const LUCKY_WHEEL_REWARDS: LuckyWheelReward[] = [
-  ...Array.from({ length: 10 }, (_, idx) => ({
-    id: `points_plus_${idx + 1}`,
-    label: `Cộng ${idx + 1} điểm`,
-    icon: '✨',
-    type: 'points' as const,
-    amount: idx + 1,
-    color: idx % 2 === 0 ? '#16a34a' : '#22c55e'
-  })),
-  ...Array.from({ length: 10 }, (_, idx) => ({
-    id: `points_minus_${idx + 1}`,
-    label: `Trừ ${idx + 1} điểm`,
-    icon: '⚡',
-    type: 'points' as const,
-    amount: -(idx + 1),
-    color: idx % 2 === 0 ? '#dc2626' : '#f97316'
-  })),
-  { id: 'pokemon_gift_1', label: 'Tặng Pokemon', icon: '🎁', type: 'pokemon', color: '#f59e0b' },
-  { id: 'pokemon_gift_2', label: 'Tặng Pokemon hiếm', icon: '🥚', type: 'pokemon', color: '#d97706' },
-  { id: 'pokemon_gift_3', label: 'Tặng Pokemon mới', icon: '🌟', type: 'pokemon', color: '#fbbf24' },
-  { id: 'skill_gift_1', label: 'Tặng skill Pokemon', icon: '📜', type: 'skill', color: '#7c3aed' },
-  { id: 'skill_gift_2', label: 'Tặng bí kíp Pet', icon: '🔮', type: 'skill', color: '#9333ea' },
-  { id: 'skill_gift_3', label: 'Tặng tuyệt chiêu', icon: '💫', type: 'skill', color: '#a855f7' },
-  { id: 'hp_plus_5', label: 'Cộng 5 HP', icon: '❤️', type: 'hp', amount: 5, color: '#059669' },
-  { id: 'hp_plus_10', label: 'Cộng 10 HP', icon: '💚', type: 'hp', amount: 10, color: '#10b981' },
-  { id: 'hp_plus_15', label: 'Cộng 15 HP', icon: '💖', type: 'hp', amount: 15, color: '#34d399' },
-  { id: 'hp_plus_20', label: 'Cộng 20 HP', icon: '💎', type: 'hp', amount: 20, color: '#2dd4bf' },
-  { id: 'hp_minus_5', label: 'Trừ 5 HP', icon: '💔', type: 'hp', amount: -5, color: '#be123c' },
-  { id: 'hp_minus_10', label: 'Trừ 10 HP', icon: '🩹', type: 'hp', amount: -10, color: '#e11d48' },
-  { id: 'hp_minus_15', label: 'Trừ 15 HP', icon: '🔥', type: 'hp', amount: -15, color: '#ea580c' },
-  { id: 'hp_minus_20', label: 'Trừ 20 HP', icon: '🌩️', type: 'hp', amount: -20, color: '#b91c1c' }
-];
+interface PokemonReleaseEvent {
+  studentId: string;
+  studentName: string;
+  releasedPet: PokemonPet;
+  remainingPets: PokemonPet[];
+}
 
 const AuthLoginForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
   const { loginWithEmail, signUpWithEmail } = useAuth();
@@ -318,6 +282,21 @@ const App: React.FC = () => {
   const [luckyWheelResult, setLuckyWheelResult] = useState<LuckyWheelResult | null>(null);
   const [luckyWheelPendingResult, setLuckyWheelPendingResult] = useState<LuckyWheelResult | null>(null);
   const [luckyWheelCandidateIds, setLuckyWheelCandidateIds] = useState<string[]>([]);
+  const [luckyWheelRewards, setLuckyWheelRewards] = useState<LuckyWheelReward[]>(() => {
+    const saved = localStorage.getItem(LUCKY_WHEEL_REWARDS_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (err) {
+        console.error("Error loading custom lucky wheel rewards:", err);
+      }
+    }
+    return DEFAULT_LUCKY_WHEEL_REWARDS;
+  });
+  const [luckyWheelDisplayRewards, setLuckyWheelDisplayRewards] = useState<LuckyWheelReward[]>(DEFAULT_LUCKY_WHEEL_REWARDS);
+  const luckyWheelRef = useRef<HTMLDivElement | null>(null);
+  const luckyWheelSpinAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Cá Ngựa / Ludo Game State
   const [showLudoModal, setShowLudoModal] = useState(false);
@@ -331,6 +310,7 @@ const App: React.FC = () => {
   const [ludoRolling, setLudoRolling] = useState(false);
   const [ludoPopup, setLudoPopup] = useState<{ title: string; desc: string; icon: string } | null>(null);
   const [ludoLogs, setLudoLogs] = useState<string[]>([]);
+  const [ludoBonusRolls, setLudoBonusRolls] = useState<Record<string, number>>({});
   const [ludoEventPopup, setLudoEventPopup] = useState<{
     title: string;
     message: string;
@@ -383,11 +363,14 @@ const App: React.FC = () => {
   // Hatching State variables
   const [showHatchModal, setShowHatchModal] = useState(false);
   const [hatchSuccessMessage, setHatchSuccessMessage] = useState<string>('');
+  const [pokemonReleaseEvent, setPokemonReleaseEvent] = useState<PokemonReleaseEvent | null>(null);
 
   // Audio settings
   const [posSoundUrl, setPosSoundUrl] = useState('https://actions.google.com/sounds/v1/foley/ting.ogg');
   const [negSoundUrl, setNegSoundUrl] = useState('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
   const [timerSoundUrl, setTimerSoundUrl] = useState('https://actions.google.com/sounds/v1/alarms/bugle_tune.ogg');
+  const [wheelSpinSoundUrl, setWheelSpinSoundUrl] = useState('https://actions.google.com/sounds/v1/transportation/airport_departure_chime.ogg');
+  const [wheelFinishSoundUrl, setWheelFinishSoundUrl] = useState('https://actions.google.com/sounds/v1/cartoon/concussive_hit_guitar_boing.ogg');
 
   // Cloud Sync properties
   const { user, profile, loginWithEmail, signUpWithEmail, signInWithGoogle, logout, updateUserProfile, loading: authLoading } = useAuth();
@@ -411,6 +394,7 @@ const App: React.FC = () => {
     skills: false,
     petSkills: false,
     ludo: false,
+    luckyWheel: false,
     data: false
   });
 
@@ -453,9 +437,16 @@ const App: React.FC = () => {
           if (cloudData.posSoundUrl) setPosSoundUrl(cloudData.posSoundUrl);
           if (cloudData.negSoundUrl) setNegSoundUrl(cloudData.negSoundUrl);
           if (cloudData.timerSoundUrl) setTimerSoundUrl(cloudData.timerSoundUrl);
+          if (cloudData.wheelSpinSoundUrl) setWheelSpinSoundUrl(cloudData.wheelSpinSoundUrl);
+          if (cloudData.wheelFinishSoundUrl) setWheelFinishSoundUrl(cloudData.wheelFinishSoundUrl);
           if (cloudData.customLudoTiles && typeof cloudData.customLudoTiles === 'object') {
             setCustomLudoTiles(cloudData.customLudoTiles);
             localStorage.setItem('custom_ludo_tiles', JSON.stringify(cloudData.customLudoTiles));
+          }
+          if (cloudData.luckyWheelRewards && Array.isArray(cloudData.luckyWheelRewards) && cloudData.luckyWheelRewards.length > 0) {
+            setLuckyWheelRewards(cloudData.luckyWheelRewards);
+            setLuckyWheelDisplayRewards(cloudData.luckyWheelRewards);
+            localStorage.setItem(LUCKY_WHEEL_REWARDS_KEY, JSON.stringify(cloudData.luckyWheelRewards));
           }
           setLastSyncedTime(cloudData.updatedAt || Date.now());
 
@@ -469,7 +460,10 @@ const App: React.FC = () => {
             posSoundUrl: cloudData.posSoundUrl || '',
             negSoundUrl: cloudData.negSoundUrl || '',
             timerSoundUrl: cloudData.timerSoundUrl || '',
-            customLudoTiles: cloudData.customLudoTiles || {}
+            wheelSpinSoundUrl: cloudData.wheelSpinSoundUrl || '',
+            wheelFinishSoundUrl: cloudData.wheelFinishSoundUrl || '',
+            customLudoTiles: cloudData.customLudoTiles || {},
+            luckyWheelRewards: cloudData.luckyWheelRewards || DEFAULT_LUCKY_WHEEL_REWARDS
           });
 
           // Also save a fallback local copy
@@ -481,6 +475,8 @@ const App: React.FC = () => {
           if (cloudData.posSoundUrl) localStorage.setItem('imperial_sound_pos', cloudData.posSoundUrl);
           if (cloudData.negSoundUrl) localStorage.setItem('imperial_sound_neg', cloudData.negSoundUrl);
           if (cloudData.timerSoundUrl) localStorage.setItem('imperial_sound_tim', cloudData.timerSoundUrl);
+          if (cloudData.wheelSpinSoundUrl) localStorage.setItem(WHEEL_SPIN_SOUND_KEY, cloudData.wheelSpinSoundUrl);
+          if (cloudData.wheelFinishSoundUrl) localStorage.setItem(WHEEL_FINISH_SOUND_KEY, cloudData.wheelFinishSoundUrl);
         } else {
           // First time logging in: check if there's any local storage data to migrate
           const saved = localStorage.getItem(STORAGE_KEY);
@@ -505,6 +501,9 @@ const App: React.FC = () => {
           const savedPetSkills = localStorage.getItem(PET_SKILLS_KEY);
           const localPetSkills = savedPetSkills ? JSON.parse(savedPetSkills) : DEFAULT_PET_SKILLS;
 
+          const savedLuckyWheelRewards = localStorage.getItem(LUCKY_WHEEL_REWARDS_KEY);
+          const localLuckyWheelRewards = savedLuckyWheelRewards ? JSON.parse(savedLuckyWheelRewards) : DEFAULT_LUCKY_WHEEL_REWARDS;
+
           // Push local state to cloud to prevent data loss on onboarding
           const updatedAt = await upsertUserSettings(user.uid, {
             students: localStudents,
@@ -515,7 +514,10 @@ const App: React.FC = () => {
             posSoundUrl,
             negSoundUrl,
             timerSoundUrl,
-            customLudoTiles
+            wheelSpinSoundUrl,
+            wheelFinishSoundUrl,
+            customLudoTiles,
+            luckyWheelRewards: localLuckyWheelRewards
           });
 
           lastSyncedSnapshotRef.current = JSON.stringify({
@@ -527,7 +529,10 @@ const App: React.FC = () => {
             posSoundUrl,
             negSoundUrl,
             timerSoundUrl,
-            customLudoTiles
+            wheelSpinSoundUrl,
+            wheelFinishSoundUrl,
+            customLudoTiles,
+            luckyWheelRewards: localLuckyWheelRewards
           });
           
           setStudents(localStudents);
@@ -535,6 +540,8 @@ const App: React.FC = () => {
           setRanksFemale(localFemaleRanks);
           setSkills(localSkills);
           setPetSkills(localPetSkills);
+          setLuckyWheelRewards(localLuckyWheelRewards);
+          setLuckyWheelDisplayRewards(localLuckyWheelRewards);
           setLastSyncedTime(updatedAt);
         }
         setCloudLoadSuccess(true);
@@ -564,7 +571,10 @@ const App: React.FC = () => {
       posSoundUrl,
       negSoundUrl,
       timerSoundUrl,
-      customLudoTiles
+      wheelSpinSoundUrl,
+      wheelFinishSoundUrl,
+      customLudoTiles,
+      luckyWheelRewards
     });
 
     // DIFFERENTIAL INCREMENTAL SYNC CHECK:
@@ -586,7 +596,10 @@ const App: React.FC = () => {
           posSoundUrl,
           negSoundUrl,
           timerSoundUrl,
+          wheelSpinSoundUrl,
+          wheelFinishSoundUrl,
           customLudoTiles,
+          luckyWheelRewards,
         });
 
         lastSyncedSnapshotRef.current = currentSnapshot;
@@ -599,7 +612,7 @@ const App: React.FC = () => {
     }, 1500); // 1.5s debounce to group multiple rapid edits together
 
     return () => clearTimeout(timer);
-  }, [students, ranksMale, ranksFemale, skills, petSkills, posSoundUrl, negSoundUrl, timerSoundUrl, customLudoTiles, user, initialCloudLoadComplete, cloudLoadSuccess]);
+  }, [students, ranksMale, ranksFemale, skills, petSkills, posSoundUrl, negSoundUrl, timerSoundUrl, wheelSpinSoundUrl, wheelFinishSoundUrl, customLudoTiles, luckyWheelRewards, user, initialCloudLoadComplete, cloudLoadSuccess]);
 
   // Sync Ludo position state maps whenever students array loads or changes
   useEffect(() => {
@@ -693,9 +706,25 @@ const App: React.FC = () => {
       const sPos = localStorage.getItem('imperial_sound_pos');
       const sNeg = localStorage.getItem('imperial_sound_neg');
       const sTim = localStorage.getItem('imperial_sound_tim');
+      const sWheelSpin = localStorage.getItem(WHEEL_SPIN_SOUND_KEY);
+      const sWheelFinish = localStorage.getItem(WHEEL_FINISH_SOUND_KEY);
       if (sPos) setPosSoundUrl(sPos);
       if (sNeg) setNegSoundUrl(sNeg);
       if (sTim) setTimerSoundUrl(sTim);
+      if (sWheelSpin) setWheelSpinSoundUrl(sWheelSpin);
+      if (sWheelFinish) setWheelFinishSoundUrl(sWheelFinish);
+
+      const savedLuckyWheelRewards = localStorage.getItem(LUCKY_WHEEL_REWARDS_KEY);
+      if (savedLuckyWheelRewards) {
+        const parsedRewards = JSON.parse(savedLuckyWheelRewards);
+        if (Array.isArray(parsedRewards) && parsedRewards.length > 0) {
+          setLuckyWheelRewards(parsedRewards);
+          setLuckyWheelDisplayRewards(parsedRewards);
+        }
+      } else {
+        setLuckyWheelRewards(DEFAULT_LUCKY_WHEEL_REWARDS);
+        setLuckyWheelDisplayRewards(DEFAULT_LUCKY_WHEEL_REWARDS);
+      }
     }
   }, [authLoading, user]);
 
@@ -723,6 +752,10 @@ const App: React.FC = () => {
     }
   }, [skills, user]);
 
+  useEffect(() => {
+    localStorage.setItem(LUCKY_WHEEL_REWARDS_KEY, JSON.stringify(luckyWheelRewards));
+  }, [luckyWheelRewards]);
+
   // Ranking Utility
   const getRank = (points: number, gender: Gender): RankInfo => {
     const list = gender === Gender.MALE ? ranksMale : ranksFemale;
@@ -746,9 +779,11 @@ const App: React.FC = () => {
   const presentStudents = useMemo(() => currentClassStudents.filter(s => !s.isAbsent), [currentClassStudents]);
   const classOptions = useMemo(() => classes.filter(c => c !== 'Tất cả'), [classes]);
   const luckyWheelBackground = useMemo(() => {
-    const sliceSize = 100 / LUCKY_WHEEL_REWARDS.length;
-    return `conic-gradient(${LUCKY_WHEEL_REWARDS.map((reward, idx) => `${reward.color} ${idx * sliceSize}% ${(idx + 1) * sliceSize}%`).join(', ')})`;
-  }, []);
+    const rewardsForWheel = luckyWheelDisplayRewards.length > 0 ? luckyWheelDisplayRewards : luckyWheelRewards;
+    if (rewardsForWheel.length === 0) return '#facc15';
+    const sliceSize = 100 / rewardsForWheel.length;
+    return `conic-gradient(${rewardsForWheel.map((reward, idx) => `${reward.color} ${idx * sliceSize}% ${(idx + 1) * sliceSize}%`).join(', ')})`;
+  }, [luckyWheelDisplayRewards, luckyWheelRewards]);
   const activeLudoClassName = ludoClassName || (filterClass !== 'Tất cả' ? filterClass : classOptions[0] || '');
   const ludoRaceStudents = useMemo(() => {
     if (!activeLudoClassName) return [];
@@ -776,6 +811,101 @@ const App: React.FC = () => {
     setShowLudoModal(true);
   };
 
+  const getRandomIndex = (length: number) => {
+    if (length <= 0) return 0;
+    if (window.crypto?.getRandomValues) {
+      const arr = new Uint32Array(1);
+      window.crypto.getRandomValues(arr);
+      return arr[0] % length;
+    }
+    return Math.floor(Math.random() * length);
+  };
+
+  const shuffleLuckyWheelRewards = (rewards: LuckyWheelReward[]) => {
+    const next = [...rewards];
+    for (let i = next.length - 1; i > 0; i -= 1) {
+      const j = getRandomIndex(i + 1);
+      [next[i], next[j]] = [next[j], next[i]];
+    }
+    return next;
+  };
+
+  const isSamePokemon = (a?: PokemonPet, b?: PokemonPet) => {
+    if (!a || !b) return false;
+    return a.dexId === b.dexId && a.name === b.name && (a.baseDexId || a.dexId) === (b.baseDexId || b.dexId);
+  };
+
+  const releasePetFromStudent = (student: Student, releasedPet: PokemonPet, reason: string) => {
+    const currentPets = student.pets && student.pets.length > 0 ? student.pets : (student.pet ? [student.pet] : []);
+    const remainingPets = currentPets.filter(p => !isSamePokemon(p, releasedPet));
+    const historyItem: HistoryItem = {
+      id: Date.now().toString() + Math.random(),
+      amount: 0,
+      reason,
+      timestamp: Date.now()
+    };
+    const nextStudent: Student = {
+      ...student,
+      pet: undefined,
+      pets: remainingPets,
+      history: [historyItem, ...student.history].slice(0, 50)
+    };
+    return {
+      student: nextStudent,
+      event: {
+        studentId: student.id,
+        studentName: student.name,
+        releasedPet,
+        remainingPets
+      } as PokemonReleaseEvent
+    };
+  };
+
+  const applyPetHpDelta = (student: Student, hpDelta: number, historyReason: string) => {
+    if (!student.pet) return { student, releaseEvent: null as PokemonReleaseEvent | null };
+    const nextHp = Math.min(100, Math.max(0, (student.pet.hp ?? 100) + hpDelta));
+    const updatedPet: PokemonPet = { ...student.pet, hp: nextHp };
+    if (nextHp <= 0) {
+      const release = releasePetFromStudent(
+        { ...student, pet: updatedPet, pets: updateActivePetInCollection(student, updatedPet) },
+        updatedPet,
+        `🌲 ${updatedPet.name} đã được thả về rừng vì hết HP. ${historyReason}`
+      );
+      return { student: release.student, releaseEvent: release.event };
+    }
+
+    return {
+      student: {
+        ...student,
+        pet: updatedPet,
+        pets: updateActivePetInCollection(student, updatedPet)
+      },
+      releaseEvent: null as PokemonReleaseEvent | null
+    };
+  };
+
+  const handleSelectReplacementPokemon = (pet: PokemonPet) => {
+    if (!pokemonReleaseEvent) return;
+    setStudents(prev => prev.map(s => {
+      if (s.id !== pokemonReleaseEvent.studentId) return s;
+      const nextStudent = { ...s, pet };
+      if (editingStudent?.id === s.id) setEditingStudent(nextStudent);
+      return nextStudent;
+    }));
+    setPokemonReleaseEvent(null);
+  };
+
+  const handleOpenEggAfterRelease = () => {
+    if (!pokemonReleaseEvent) return;
+    const student = students.find(s => s.id === pokemonReleaseEvent.studentId);
+    if (student) {
+      setEditingStudent(student);
+      setProfileTab('pet');
+      setCurrentScreen('profile');
+    }
+    setPokemonReleaseEvent(null);
+  };
+
   const handleUpdatePoints = async (ids: string[], amount: number, reason: string) => {
     if (isNaN(amount)) return;
 
@@ -785,6 +915,7 @@ const App: React.FC = () => {
 
     let hatchedNames: string[] = [];
     let evolvedMessages: string[] = [];
+    let releaseEventToShow: PokemonReleaseEvent | null = null;
 
     const updatedStudents = students.map(s => {
       if (ids.includes(s.id)) {
@@ -802,6 +933,8 @@ const App: React.FC = () => {
         // Egg and Pet logic
         let currentEgg = s.egg ? { ...s.egg } : { progress: 0, status: 'egg' as const, assignedDexId: LIST_POKEMONS[Math.floor(Math.random() * LIST_POKEMONS.length)].dexId };
         let currentPet = s.pet ? { ...s.pet } : undefined;
+        let currentPets = s.pets ? [...s.pets] : (currentPet ? [currentPet] : []);
+        let releaseHistory: HistoryItem | null = null;
 
         if (amount > 0 && currentEgg.status === 'egg') {
           const nextProgress = currentEgg.progress + amount;
@@ -823,6 +956,7 @@ const App: React.FC = () => {
               skills: [],
               baseDexId: originalBaseId
             };
+            currentPets = [currentPet, ...currentPets.filter(p => !isSamePokemon(p, currentPet))];
             hatchedNames.push(s.name);
           }
         } else if (currentPet) {
@@ -849,20 +983,43 @@ const App: React.FC = () => {
               hp: newHp
             };
           }
+          currentPets = currentPets.map(p => isSamePokemon(p, s.pet) ? currentPet! : p);
+
+          if ((currentPet.hp ?? 100) <= 0) {
+            const releasedPet = currentPet;
+            currentPets = currentPets.filter(p => !isSamePokemon(p, releasedPet));
+            currentPet = undefined;
+            releaseHistory = {
+              id: Date.now().toString() + Math.random(),
+              amount: 0,
+              reason: `🌲 ${releasedPet.name} đã được thả về rừng vì hết HP.`,
+              timestamp: Date.now()
+            };
+            if (!releaseEventToShow) {
+              releaseEventToShow = {
+                studentId: s.id,
+                studentName: s.name,
+                releasedPet,
+                remainingPets: currentPets
+              };
+            }
+          }
         }
 
         return { 
           ...s, 
           points: newPoints, 
-          history: [history, ...s.history].slice(0, 50),
+          history: [releaseHistory, history, ...s.history].filter(Boolean).slice(0, 50) as HistoryItem[],
           egg: currentEgg,
-          pet: currentPet
+          pet: currentPet,
+          pets: currentPets
         };
       }
       return s;
     });
 
     setStudents(updatedStudents);
+    if (releaseEventToShow) setPokemonReleaseEvent(releaseEventToShow);
 
     // Keep profile details in sync if points were changed while viewing them
     if (editingStudent && ids.includes(editingStudent.id)) {
@@ -1093,6 +1250,10 @@ const App: React.FC = () => {
       posSoundUrl,
       negSoundUrl,
       timerSoundUrl,
+      wheelSpinSoundUrl,
+      wheelFinishSoundUrl,
+      customLudoTiles,
+      luckyWheelRewards,
       exportedAt: Date.now()
     };
     const jsonString = JSON.stringify(data, null, 2);
@@ -1138,6 +1299,21 @@ const App: React.FC = () => {
         if (data.timerSoundUrl) {
           setTimerSoundUrl(data.timerSoundUrl);
         }
+        if (data.wheelSpinSoundUrl) {
+          setWheelSpinSoundUrl(data.wheelSpinSoundUrl);
+        }
+        if (data.wheelFinishSoundUrl) {
+          setWheelFinishSoundUrl(data.wheelFinishSoundUrl);
+        }
+        if (data.customLudoTiles && typeof data.customLudoTiles === 'object') {
+          setCustomLudoTiles(data.customLudoTiles);
+          localStorage.setItem('custom_ludo_tiles', JSON.stringify(data.customLudoTiles));
+        }
+        if (data.luckyWheelRewards && Array.isArray(data.luckyWheelRewards)) {
+          setLuckyWheelRewards(data.luckyWheelRewards);
+          setLuckyWheelDisplayRewards(data.luckyWheelRewards);
+          localStorage.setItem(LUCKY_WHEEL_REWARDS_KEY, JSON.stringify(data.luckyWheelRewards));
+        }
 
         // Trigger immediate sync to Supabase if user is authenticated
         if (user) {
@@ -1151,7 +1327,10 @@ const App: React.FC = () => {
               posSoundUrl: data.posSoundUrl || "",
               negSoundUrl: data.negSoundUrl || "",
               timerSoundUrl: data.timerSoundUrl || "",
-              customLudoTiles: data.customLudoTiles || customLudoTiles
+              wheelSpinSoundUrl: data.wheelSpinSoundUrl || wheelSpinSoundUrl,
+              wheelFinishSoundUrl: data.wheelFinishSoundUrl || wheelFinishSoundUrl,
+              customLudoTiles: data.customLudoTiles || customLudoTiles,
+              luckyWheelRewards: data.luckyWheelRewards || luckyWheelRewards
           }).then((updatedAt) => {
             setLastSyncedTime(updatedAt);
             setIsSyncing(false);
@@ -1187,7 +1366,10 @@ const App: React.FC = () => {
         posSoundUrl,
         negSoundUrl,
         timerSoundUrl,
-        customLudoTiles
+        wheelSpinSoundUrl,
+        wheelFinishSoundUrl,
+        customLudoTiles,
+        luckyWheelRewards
       });
       setLastSyncedTime(updatedAt);
       if (!silent) {
@@ -1241,9 +1423,22 @@ const App: React.FC = () => {
         if (cloudData.timerSoundUrl) {
           setTimerSoundUrl(cloudData.timerSoundUrl);
         }
+        if (cloudData.wheelSpinSoundUrl) {
+          setWheelSpinSoundUrl(cloudData.wheelSpinSoundUrl);
+          localStorage.setItem(WHEEL_SPIN_SOUND_KEY, cloudData.wheelSpinSoundUrl);
+        }
+        if (cloudData.wheelFinishSoundUrl) {
+          setWheelFinishSoundUrl(cloudData.wheelFinishSoundUrl);
+          localStorage.setItem(WHEEL_FINISH_SOUND_KEY, cloudData.wheelFinishSoundUrl);
+        }
         if (cloudData.customLudoTiles && typeof cloudData.customLudoTiles === 'object') {
           setCustomLudoTiles(cloudData.customLudoTiles);
           localStorage.setItem('custom_ludo_tiles', JSON.stringify(cloudData.customLudoTiles));
+        }
+        if (cloudData.luckyWheelRewards && Array.isArray(cloudData.luckyWheelRewards) && cloudData.luckyWheelRewards.length > 0) {
+          setLuckyWheelRewards(cloudData.luckyWheelRewards);
+          setLuckyWheelDisplayRewards(cloudData.luckyWheelRewards);
+          localStorage.setItem(LUCKY_WHEEL_REWARDS_KEY, JSON.stringify(cloudData.luckyWheelRewards));
         }
         setLastSyncedTime(cloudData.updatedAt || Date.now());
         alert("Khánh chúc! Đã PHỤC HỒI dữ liệu từ đám mây thành công tốt đẹp! Toàn bộ sỹ tử và tiên thú đã hội quân. ⚜️☁️✨");
@@ -1333,11 +1528,12 @@ const App: React.FC = () => {
 
   const getLuckyWheelValidRewards = (student: Student) => {
     const ownedSkillIds = student.pet?.skills || [];
-    return LUCKY_WHEEL_REWARDS.filter(reward => {
+    return luckyWheelRewards.filter(reward => {
       if (reward.type === 'hp') return !!student.pet;
       if (reward.type === 'skill') {
         return !!student.pet && petSkills.some(sk => !ownedSkillIds.includes(sk.id));
       }
+      if (reward.type === 'ludo_rolls') return (reward.amount || 0) > 0;
       return true;
     });
   };
@@ -1386,6 +1582,15 @@ const App: React.FC = () => {
       };
     }
 
+    if (reward.type === 'ludo_rolls') {
+      const rolls = Math.min(5, Math.max(1, reward.amount || 1));
+      return {
+        student,
+        reward: { ...reward, amount: rolls },
+        message: `${student.name} được thêm ${rolls} lượt lắc xúc xắc Cá Ngựa!`
+      };
+    }
+
     const pointAmount = reward.amount || 0;
     return {
       student,
@@ -1395,8 +1600,9 @@ const App: React.FC = () => {
   };
 
   const updateActivePetInCollection = (student: Student, nextPet: PokemonPet) => {
-    if (!student.pet || !student.pets) return student.pets;
-    return student.pets.map(p =>
+    if (!student.pet) return student.pets || [nextPet];
+    const currentPets = student.pets && student.pets.length > 0 ? student.pets : [student.pet];
+    return currentPets.map(p =>
       p.dexId === student.pet!.dexId && p.name === student.pet!.name ? nextPet : p
     );
   };
@@ -1412,6 +1618,7 @@ const App: React.FC = () => {
     }
 
     const isPositiveReward = reward.type !== 'hp' || (result.hpDelta || 0) >= 0;
+    let releaseEventToShow: PokemonReleaseEvent | null = null;
 
     setStudents(prev => {
       let updatedTarget: Student | null = null;
@@ -1460,16 +1667,26 @@ const App: React.FC = () => {
         }
 
         if (reward.type === 'hp' && s.pet) {
-          const currentHp = s.pet.hp ?? 100;
-          const nextHp = Math.min(100, Math.max(0, currentHp + (result.hpDelta || 0)));
-          const updatedPet: PokemonPet = {
-            ...s.pet,
-            hp: nextHp
+          const hpUpdate = applyPetHpDelta(s, result.hpDelta || 0, `Vòng quay may mắn: ${reward.label}`);
+          const updatedS: Student = {
+            ...hpUpdate.student,
+            history: [historyItem, ...hpUpdate.student.history].slice(0, 50)
           };
+          if (hpUpdate.releaseEvent && !releaseEventToShow) releaseEventToShow = hpUpdate.releaseEvent;
+          updatedTarget = updatedS;
+          return updatedS;
+        }
+
+        if (reward.type === 'ludo_rolls') {
+          const rolls = Math.min(5, Math.max(1, reward.amount || 1));
+          setLudoBonusRolls(prevRolls => ({
+            ...prevRolls,
+            [s.id]: (prevRolls[s.id] || 0) + rolls
+          }));
+          setLudoClassName(s.className);
+          setLudoActiveStudent(s);
           const updatedS: Student = {
             ...s,
-            pet: updatedPet,
-            pets: updateActivePetInCollection(s, updatedPet),
             history: [historyItem, ...s.history].slice(0, 50)
           };
           updatedTarget = updatedS;
@@ -1487,6 +1704,7 @@ const App: React.FC = () => {
     });
 
     new Audio(isPositiveReward ? posSoundUrl : negSoundUrl).play().catch(() => {});
+    if (releaseEventToShow) setPokemonReleaseEvent(releaseEventToShow);
     setSelectedStudentIds([]);
     setIsMultiSelectMode(false);
     setLuckyWheelResult(result);
@@ -1502,25 +1720,84 @@ const App: React.FC = () => {
       return;
     }
 
-    const chosenStudent = candidates[Math.floor(Math.random() * candidates.length)];
-    const validRewards = getLuckyWheelValidRewards(chosenStudent);
-    const chosenReward = validRewards[Math.floor(Math.random() * validRewards.length)];
-    const preparedResult = prepareLuckyWheelResult(chosenStudent, chosenReward);
-    const rewardIndex = Math.max(0, LUCKY_WHEEL_REWARDS.findIndex(reward => reward.id === chosenReward.id));
-    const segmentSize = 360 / LUCKY_WHEEL_REWARDS.length;
-    const targetCenter = rewardIndex * segmentSize + segmentSize / 2;
-    const finalRotation = Math.ceil(luckyWheelRotation / 360) * 360 + 1800 + (360 - targetCenter);
-
     setLuckyWheelCandidateIds(candidates.map(s => s.id));
-    setLuckyWheelPendingResult(preparedResult);
+    const shuffledRewards = shuffleLuckyWheelRewards(luckyWheelRewards.length > 0 ? luckyWheelRewards : DEFAULT_LUCKY_WHEEL_REWARDS);
+    setLuckyWheelDisplayRewards(shuffledRewards);
+    setLuckyWheelPendingResult(null);
     setLuckyWheelResult(null);
     setShowLuckyWheelModal(true);
+  };
+
+  const startLuckyWheelSpin = () => {
+    if (isLuckyWheelSpinning) return;
+
+    const candidates = students.filter(s => luckyWheelCandidateIds.includes(s.id) && !s.isAbsent);
+    if (candidates.length === 0) {
+      alert("Không còn học sinh hợp lệ trong lượt quay này.");
+      return;
+    }
+
+    const chosenStudent = candidates[getRandomIndex(candidates.length)];
+    const validRewards = getLuckyWheelValidRewards(chosenStudent);
+    if (validRewards.length === 0) {
+      alert("Không có phần thưởng/hình phạt hợp lệ cho học sinh này. Vui lòng kiểm tra Customize Vòng quay may mắn.");
+      return;
+    }
+
+    const displayRewards = luckyWheelDisplayRewards.length > 0 ? luckyWheelDisplayRewards : shuffleLuckyWheelRewards(luckyWheelRewards);
+    const chosenReward = validRewards[getRandomIndex(validRewards.length)];
+    const preparedResult = prepareLuckyWheelResult(chosenStudent, chosenReward);
+    const rewardIndex = Math.max(0, displayRewards.findIndex(reward => reward.id === chosenReward.id));
+    const segmentSize = 360 / Math.max(1, displayRewards.length);
+    const targetCenter = rewardIndex * segmentSize + segmentSize / 2;
+    const startRotation = luckyWheelRotation % 360;
+    const finalRotation = luckyWheelRotation + 360 * 12 + (360 - targetCenter);
+
+    setLuckyWheelPendingResult(preparedResult);
+    setLuckyWheelResult(null);
     setIsLuckyWheelSpinning(true);
-    setLuckyWheelRotation(finalRotation);
+    setLuckyWheelRotation(startRotation);
+
+    if (luckyWheelSpinAudioRef.current) {
+      luckyWheelSpinAudioRef.current.pause();
+      luckyWheelSpinAudioRef.current = null;
+    }
+    if (wheelSpinSoundUrl.trim()) {
+      const spinAudio = new Audio(wheelSpinSoundUrl);
+      spinAudio.loop = true;
+      spinAudio.volume = 0.55;
+      luckyWheelSpinAudioRef.current = spinAudio;
+      spinAudio.play().catch(() => {});
+    }
+
+    window.requestAnimationFrame(() => {
+      if (luckyWheelRef.current) {
+        luckyWheelRef.current.getAnimations().forEach(animation => animation.cancel());
+        luckyWheelRef.current.animate([
+          { transform: `rotate(${startRotation}deg)`, offset: 0 },
+          { transform: `rotate(${startRotation + 180}deg)`, offset: 0.15 },
+          { transform: `rotate(${startRotation + 360 * 8}deg)`, offset: 0.7 },
+          { transform: `rotate(${finalRotation}deg)`, offset: 1 }
+        ], {
+          duration: 10000,
+          easing: 'linear',
+          fill: 'forwards'
+        });
+      }
+    });
 
     window.setTimeout(() => {
+      if (luckyWheelSpinAudioRef.current) {
+        luckyWheelSpinAudioRef.current.pause();
+        luckyWheelSpinAudioRef.current.currentTime = 0;
+        luckyWheelSpinAudioRef.current = null;
+      }
+      if (wheelFinishSoundUrl.trim()) {
+        new Audio(wheelFinishSoundUrl).play().catch(() => {});
+      }
+      setLuckyWheelRotation(finalRotation);
       applyLuckyWheelReward(preparedResult);
-    }, 2400);
+    }, 10000);
   };
 
   const handleResolveBattle = () => {
@@ -1533,6 +1810,7 @@ const App: React.FC = () => {
     let updatedStudents = [...students];
     let resultMsg = "";
     let winner: Student | null = null;
+    let releaseEventToShow: PokemonReleaseEvent | null = null;
 
     if (scoreA > scoreB) {
       winner = battleStudentA;
@@ -1540,26 +1818,21 @@ const App: React.FC = () => {
       updatedStudents = updatedStudents.map(s => {
         if (s.id === battleStudentA.id) {
           const newPts = s.points + scoreA;
-          const oldHp = s.pet?.hp ?? 100;
-          const newHp = Math.min(100, Math.max(0, oldHp + diff));
-          const newPet = s.pet ? { ...s.pet, hp: newHp } : undefined;
+          const hpUpdate = applyPetHpDelta(s, diff, `Battle thắng: hồi ${diff} HP`);
           return {
-            ...s,
+            ...hpUpdate.student,
             points: newPts,
-            pet: newPet,
-            history: [{ id: Date.now().toString() + Math.random(), amount: scoreA, reason: `🏆 Thắng Battle: +${scoreA}đ (Pokemon +${diff} HP)`, timestamp: Date.now() }, ...s.history]
+            history: [{ id: Date.now().toString() + Math.random(), amount: scoreA, reason: `🏆 Thắng Battle: +${scoreA}đ (Pokemon +${diff} HP)`, timestamp: Date.now() }, ...hpUpdate.student.history]
           };
         }
         if (s.id === battleStudentB.id) {
           const newPts = s.points + scoreB;
-          const oldHp = s.pet?.hp ?? 100;
-          const newHp = Math.min(100, Math.max(0, oldHp - diff));
-          const newPet = s.pet ? { ...s.pet, hp: newHp } : undefined;
+          const hpUpdate = applyPetHpDelta(s, -diff, `Battle thua: mất ${diff} HP`);
+          if (hpUpdate.releaseEvent && !releaseEventToShow) releaseEventToShow = hpUpdate.releaseEvent;
           return {
-            ...s,
+            ...hpUpdate.student,
             points: newPts,
-            pet: newPet,
-            history: [{ id: Date.now().toString() + Math.random(), amount: scoreB, reason: `⚔️ Thua Battle: +${scoreB}đ (Pokemon -${diff} HP)`, timestamp: Date.now() }, ...s.history]
+            history: [{ id: Date.now().toString() + Math.random(), amount: scoreB, reason: `⚔️ Thua Battle: +${scoreB}đ (Pokemon -${diff} HP)`, timestamp: Date.now() }, ...hpUpdate.student.history]
           };
         }
         return s;
@@ -1572,26 +1845,21 @@ const App: React.FC = () => {
       updatedStudents = updatedStudents.map(s => {
         if (s.id === battleStudentB.id) {
           const newPts = s.points + scoreB;
-          const oldHp = s.pet?.hp ?? 100;
-          const newHp = Math.min(100, Math.max(0, oldHp + diff));
-          const newPet = s.pet ? { ...s.pet, hp: newHp } : undefined;
+          const hpUpdate = applyPetHpDelta(s, diff, `Battle thắng: hồi ${diff} HP`);
           return {
-            ...s,
+            ...hpUpdate.student,
             points: newPts,
-            pet: newPet,
-            history: [{ id: Date.now().toString() + Math.random(), amount: scoreB, reason: `🏆 Thắng Battle: +${scoreB}đ (Pokemon +${diff} HP)`, timestamp: Date.now() }, ...s.history]
+            history: [{ id: Date.now().toString() + Math.random(), amount: scoreB, reason: `🏆 Thắng Battle: +${scoreB}đ (Pokemon +${diff} HP)`, timestamp: Date.now() }, ...hpUpdate.student.history]
           };
         }
         if (s.id === battleStudentA.id) {
           const newPts = s.points + scoreA;
-          const oldHp = s.pet?.hp ?? 100;
-          const newHp = Math.min(100, Math.max(0, oldHp - diff));
-          const newPet = s.pet ? { ...s.pet, hp: newHp } : undefined;
+          const hpUpdate = applyPetHpDelta(s, -diff, `Battle thua: mất ${diff} HP`);
+          if (hpUpdate.releaseEvent && !releaseEventToShow) releaseEventToShow = hpUpdate.releaseEvent;
           return {
-            ...s,
+            ...hpUpdate.student,
             points: newPts,
-            pet: newPet,
-            history: [{ id: Date.now().toString() + Math.random(), amount: scoreA, reason: `⚔️ Thua Battle: +${scoreA}đ (Pokemon -${diff} HP)`, timestamp: Date.now() }, ...s.history]
+            history: [{ id: Date.now().toString() + Math.random(), amount: scoreA, reason: `⚔️ Thua Battle: +${scoreA}đ (Pokemon -${diff} HP)`, timestamp: Date.now() }, ...hpUpdate.student.history]
           };
         }
         return s;
@@ -1624,6 +1892,7 @@ const App: React.FC = () => {
     }
 
     setStudents(updatedStudents);
+    if (releaseEventToShow) setPokemonReleaseEvent(releaseEventToShow);
     new Audio(posSoundUrl).play().catch(() => {});
 
     const updatedA = updatedStudents.find(s => s.id === battleStudentA.id) || battleStudentA;
@@ -1819,22 +2088,34 @@ const App: React.FC = () => {
     setEditingTileIndex(null);
   };
 
-  const handleLudoRollDice = (student: Student) => {
+  const handleLudoRollDice = (student: Student, options?: { isBonusRoll?: boolean }) => {
     if (ludoRolling) return;
+    const isBonusRoll = !!options?.isBonusRoll;
     setLudoRolling(true);
     setLudoDice(null);
     playDiceSound();
 
-    // 1. Award +1 point for answering correctly
+    if (isBonusRoll) {
+      setLudoBonusRolls(prev => ({
+        ...prev,
+        [student.id]: Math.max(0, (prev[student.id] || 0) - 1)
+      }));
+    }
+
+    // 1. Award +1 point for answering correctly, except bonus rolls from Lucky Wheel.
     let updatedStudents = students.map(s => {
-      if (s.id === student.id) {
+      if (s.id !== student.id) return s;
+      if (isBonusRoll) {
         return {
           ...s,
-          points: s.points + 1,
-          history: [{ id: Date.now().toString() + Math.random(), amount: 1, reason: '🎲 Trả lời đúng câu hỏi Cá Ngựa (+1đ)', timestamp: Date.now() }, ...s.history]
+          history: [{ id: Date.now().toString() + Math.random(), amount: 0, reason: '🎁 Lượt lắc Cá Ngựa bonus từ Vòng quay may mắn', timestamp: Date.now() }, ...s.history]
         };
       }
-      return s;
+      return {
+        ...s,
+        points: s.points + 1,
+        history: [{ id: Date.now().toString() + Math.random(), amount: 1, reason: '🎲 Trả lời đúng câu hỏi Cá Ngựa (+1đ)', timestamp: Date.now() }, ...s.history]
+      };
     });
 
     setTimeout(() => {
@@ -2150,6 +2431,23 @@ const App: React.FC = () => {
       description: 'Mô tả quyền năng Pokémon mới.'
     };
     setPetSkills(prev => [...prev, newSkill]);
+  };
+
+  const updateLuckyWheelReward = (id: string, field: keyof LuckyWheelReward, value: any) => {
+    setLuckyWheelRewards(prev => prev.map(reward => reward.id === id ? { ...reward, [field]: value } : reward));
+  };
+
+  const addLuckyWheelReward = (type: LuckyWheelRewardType = 'points') => {
+    const amountByType = type === 'pokemon' || type === 'skill' ? undefined : type === 'ludo_rolls' ? 1 : 1;
+    const nextReward: LuckyWheelReward = {
+      id: `wheel_custom_${Date.now()}`,
+      label: type === 'ludo_rolls' ? 'Lắc Cá Ngựa 1 lần' : 'Phần thưởng mới',
+      icon: type === 'ludo_rolls' ? '🎲' : '✨',
+      type,
+      amount: amountByType,
+      color: '#d946ef'
+    };
+    setLuckyWheelRewards(prev => [...prev, nextReward]);
   };
 
   const toggleSettingsSection = (section: string) => {
@@ -2652,6 +2950,13 @@ const App: React.FC = () => {
                             🧪 Ủng Hộ +1đ Hào Quang Ấp Trứng
                           </button>
 
+                          <button
+                            onClick={() => handleBuyNewEgg(editingStudent.id)}
+                            className="w-full bg-red-800 hover:bg-red-950 text-white font-bold py-3.5 rounded-2xl shadow-md active:scale-95 transition-all text-xs uppercase"
+                          >
+                            🥚 Thỉnh Trứng Pokémon Mới (10đ)
+                          </button>
+
                           {editingStudent.egg && editingStudent.egg.progress >= 10 && (
                              <button 
                                onClick={() => {
@@ -2989,12 +3294,14 @@ const App: React.FC = () => {
           <div className="animate-in slide-in-from-bottom-4 duration-500 space-y-8 pb-12">
             <h2 className="text-3xl font-royal text-red-800 text-center uppercase">Thiết Lập Triều Đình</h2>
 
-            <SettingsSection id="sound" icon="🔊" title="Cài Đặt Âm Thanh" subtitle="Youtube hoặc audio URL cho cộng điểm, trừ điểm và timer." collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <SettingsSection id="sound" icon="🔊" title="Cài Đặt Âm Thanh" subtitle="Youtube hoặc audio URL cho cộng điểm, trừ điểm, timer và vòng quay may mắn." collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
                 {[
                   ['Cộng Điểm (Tích cực)', posSoundUrl, setPosSoundUrl],
                   ['Trừ Điểm (Cần cố gắng)', negSoundUrl, setNegSoundUrl],
-                  ['Timer Hết Giờ', timerSoundUrl, setTimerSoundUrl]
+                  ['Timer Hết Giờ', timerSoundUrl, setTimerSoundUrl],
+                  ['Vòng Quay Đang Quay', wheelSpinSoundUrl, setWheelSpinSoundUrl],
+                  ['Vòng Quay Kết Thúc', wheelFinishSoundUrl, setWheelFinishSoundUrl]
                 ].map(([label, value, setter]) => (
                   <div key={label as string} className="space-y-2">
                     <label className="text-[10px] font-black uppercase text-gray-400">{label as string}</label>
@@ -3012,6 +3319,8 @@ const App: React.FC = () => {
                   localStorage.setItem('imperial_sound_pos', posSoundUrl);
                   localStorage.setItem('imperial_sound_neg', negSoundUrl);
                   localStorage.setItem('imperial_sound_tim', timerSoundUrl);
+                  localStorage.setItem(WHEEL_SPIN_SOUND_KEY, wheelSpinSoundUrl);
+                  localStorage.setItem(WHEEL_FINISH_SOUND_KEY, wheelFinishSoundUrl);
                   alert("Đã lưu cài đặt âm thanh!");
                 }}
                 className="bg-red-800 text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-red-900 transition-all uppercase text-xs"
@@ -3163,6 +3472,56 @@ const App: React.FC = () => {
                     </div>
                   </div>
                 ))}
+              </div>
+            </SettingsSection>
+
+            <SettingsSection id="luckyWheel" icon="🎡" title="Customize Vòng Quay May Mắn" subtitle="Tùy chỉnh phần thưởng, hình phạt, HP, Pokémon skill và lượt lắc Cá Ngựa." className="bg-fuchsia-50 p-6 sm:p-10 rounded-[40px] border-4 border-fuchsia-200 text-left space-y-6 my-8" collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
+              <div className="flex flex-wrap justify-end gap-3">
+                <button onClick={() => addLuckyWheelReward('points')} className="bg-fuchsia-700 hover:bg-fuchsia-800 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all">
+                  + Thêm Mục Quay
+                </button>
+                <button onClick={() => addLuckyWheelReward('ludo_rolls')} className="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all">
+                  + Thêm Lượt Cá Ngựa
+                </button>
+                <button onClick={() => { if(confirm('Khôi phục danh sách Vòng quay may mắn mặc định?')) setLuckyWheelRewards(DEFAULT_LUCKY_WHEEL_REWARDS); }} className="bg-fuchsia-100 hover:bg-fuchsia-200 text-fuchsia-950 px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all border border-fuchsia-200">
+                  Khôi Phục Mặc Định
+                </button>
+              </div>
+
+              <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1 custom-scrollbar">
+                {luckyWheelRewards.map(reward => {
+                  const needsAmount = reward.type === 'points' || reward.type === 'hp' || reward.type === 'ludo_rolls';
+                  return (
+                    <div key={reward.id} className="bg-white p-4 rounded-3xl border border-fuchsia-100 shadow-sm space-y-3">
+                      <div className="grid grid-cols-1 md:grid-cols-[56px_1fr_150px_100px_80px_auto] gap-3 items-center">
+                        <input value={reward.icon} onChange={e => updateLuckyWheelReward(reward.id, 'icon', e.target.value)} className="w-14 h-14 text-2xl text-center bg-fuchsia-50 rounded-2xl outline-none focus:ring-2 ring-fuchsia-100" />
+                        <input value={reward.label} onChange={e => updateLuckyWheelReward(reward.id, 'label', e.target.value)} className="min-w-0 font-black text-sm border-b border-transparent focus:border-fuchsia-200 outline-none" />
+                        <select value={reward.type} onChange={e => updateLuckyWheelReward(reward.id, 'type', e.target.value as LuckyWheelRewardType)} className="w-full bg-fuchsia-50 border border-fuchsia-100 rounded-xl p-2.5 text-xs font-black outline-none">
+                          <option value="points">Điểm</option>
+                          <option value="pokemon">Tặng Pokémon</option>
+                          <option value="skill">Tặng Skill Pokémon</option>
+                          <option value="hp">HP Pokémon</option>
+                          <option value="ludo_rolls">Lượt Cá Ngựa</option>
+                        </select>
+                        <input
+                          type="number"
+                          min={reward.type === 'ludo_rolls' ? 1 : undefined}
+                          max={reward.type === 'ludo_rolls' ? 5 : undefined}
+                          disabled={!needsAmount}
+                          value={reward.amount ?? 0}
+                          onChange={e => {
+                            const raw = parseInt(e.target.value) || 0;
+                            const value = reward.type === 'ludo_rolls' ? Math.min(5, Math.max(1, raw)) : raw;
+                            updateLuckyWheelReward(reward.id, 'amount', value);
+                          }}
+                          className="w-full text-center font-black text-xs p-2.5 bg-fuchsia-50 rounded-xl outline-none focus:ring-2 ring-fuchsia-100 disabled:opacity-30"
+                        />
+                        <input type="color" value={reward.color} onChange={e => updateLuckyWheelReward(reward.id, 'color', e.target.value)} className="w-20 h-11 bg-white border border-fuchsia-100 rounded-xl p-1" />
+                        <button onClick={() => { if(confirm('Xóa mục vòng quay này?')) setLuckyWheelRewards(prev => prev.filter(x => x.id !== reward.id)); }} className="text-gray-300 hover:text-red-500 transition-colors p-2">🗑️</button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </SettingsSection>
 
@@ -3674,9 +4033,9 @@ const App: React.FC = () => {
           onClick={(e) => {
             if (e.target === e.currentTarget && !isLuckyWheelSpinning) setShowLuckyWheelModal(false);
           }}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md overflow-y-auto"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 backdrop-blur-md overflow-y-auto"
         >
-          <div className="bg-white w-full max-w-5xl rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in duration-300 relative border-4 border-fuchsia-700 my-auto">
+          <div className="bg-[#17051f] w-full max-w-5xl rounded-[40px] shadow-[0_0_80px_rgba(217,70,239,0.55)] overflow-hidden animate-in zoom-in duration-300 relative border-4 border-fuchsia-500 my-auto">
             <button
               onClick={() => !isLuckyWheelSpinning && setShowLuckyWheelModal(false)}
               disabled={isLuckyWheelSpinning}
@@ -3685,40 +4044,44 @@ const App: React.FC = () => {
               &times;
             </button>
 
-            <div className="bg-gradient-to-r from-red-950 via-fuchsia-900 to-purple-950 text-white p-6 sm:p-8">
-              <div className="flex items-center gap-4">
+            <div className="bg-gradient-to-r from-red-950 via-fuchsia-900 to-purple-950 text-white p-6 sm:p-8 relative overflow-hidden">
+              <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_20%_30%,rgba(250,204,21,0.45),transparent_24%),radial-gradient(circle_at_80%_20%,rgba(34,211,238,0.35),transparent_24%),radial-gradient(circle_at_50%_90%,rgba(217,70,239,0.45),transparent_30%)]" />
+              <div className="flex items-center gap-4 relative z-10">
                 <div className="w-14 h-14 rounded-3xl bg-white/15 border border-white/30 flex items-center justify-center text-4xl shadow-inner">
                   🎡
                 </div>
                 <div>
                   <h2 className="text-2xl sm:text-3xl font-royal uppercase tracking-wider text-amber-200">Vòng Quay May Mắn</h2>
                   <p className="text-xs sm:text-sm text-fuchsia-100 font-bold mt-1">
-                    {isLuckyWheelSpinning ? 'Đang chọn 1 học sĩ và 1 phần thưởng...' : 'Mỗi lượt chỉ có 1 học sĩ nhận 1 phần thưởng duy nhất.'}
+                    {isLuckyWheelSpinning ? 'Đang quay trong 10 giây...' : 'Bấm quay để bắt đầu chọn học sĩ và phần thưởng ngẫu nhiên.'}
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_0.9fr] gap-8 p-6 sm:p-8 bg-gradient-to-br from-fuchsia-50 via-white to-amber-50">
+            <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_0.9fr] gap-8 p-6 sm:p-8 bg-[radial-gradient(circle_at_top,rgba(250,204,21,0.22),transparent_34%),linear-gradient(135deg,#3b0764,#701a75_45%,#111827)]">
               <div className="flex flex-col items-center justify-center gap-6">
                 <div className="relative w-[min(82vw,380px)] aspect-square">
                   <div className="absolute -top-2 left-1/2 -translate-x-1/2 z-30 w-0 h-0 border-l-[16px] border-r-[16px] border-t-[34px] border-l-transparent border-r-transparent border-t-red-800 drop-shadow-lg" />
                   <div
-                    className="absolute inset-0 rounded-full border-[10px] border-amber-300 shadow-2xl overflow-hidden transition-transform duration-[2400ms] ease-out"
+                    ref={luckyWheelRef}
+                    className="absolute inset-0 rounded-full border-[10px] border-amber-300 shadow-[0_0_45px_rgba(250,204,21,0.85),0_0_90px_rgba(217,70,239,0.5)] overflow-hidden"
                     style={{
                       background: luckyWheelBackground,
                       transform: `rotate(${luckyWheelRotation}deg)`
                     }}
                   >
-                    {LUCKY_WHEEL_REWARDS.map((reward, idx) => {
-                      const angle = idx * (360 / LUCKY_WHEEL_REWARDS.length) + (180 / LUCKY_WHEEL_REWARDS.length);
+                    {(luckyWheelDisplayRewards.length > 0 ? luckyWheelDisplayRewards : luckyWheelRewards).map((reward, idx, arr) => {
+                      const angle = idx * (360 / arr.length) + (180 / arr.length);
                       const label = reward.type === 'points' || reward.type === 'hp'
                         ? `${reward.icon}${reward.amount && reward.amount > 0 ? '+' : ''}${reward.amount}`
+                        : reward.type === 'ludo_rolls'
+                          ? `${reward.icon}x${Math.min(5, Math.max(1, reward.amount || 1))}`
                         : reward.icon;
                       return (
                         <span
                           key={reward.id}
-                          className="absolute left-1/2 top-1/2 text-[10px] sm:text-xs font-black text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.7)] select-none"
+                          className="absolute left-1/2 top-1/2 text-sm sm:text-base font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] select-none"
                           style={{
                             transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(calc(-1 * min(34vw, 150px))) rotate(${-angle}deg)`
                           }}
@@ -3731,20 +4094,21 @@ const App: React.FC = () => {
                   <div className="absolute inset-[35%] rounded-full bg-white border-8 border-amber-300 shadow-xl flex items-center justify-center text-5xl z-20">
                     {isLuckyWheelSpinning ? '🎲' : (luckyWheelResult?.reward.icon || luckyWheelPendingResult?.reward.icon || '🎡')}
                   </div>
+                  <div className="absolute -inset-6 rounded-full border border-amber-300/30 shadow-[0_0_60px_rgba(250,204,21,0.55)] pointer-events-none" />
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 w-full max-w-xl text-[10px] font-black uppercase tracking-wide">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 w-full max-w-xl text-xs font-black uppercase tracking-wide">
                   <div className="bg-emerald-100 text-emerald-800 rounded-2xl px-3 py-2 text-center">+ Điểm tối đa 10</div>
                   <div className="bg-red-100 text-red-800 rounded-2xl px-3 py-2 text-center">- Điểm tối đa 10</div>
                   <div className="bg-amber-100 text-amber-900 rounded-2xl px-3 py-2 text-center">Tặng Pokemon</div>
                   <div className="bg-purple-100 text-purple-900 rounded-2xl px-3 py-2 text-center">Tặng Skill</div>
                   <div className="bg-teal-100 text-teal-900 rounded-2xl px-3 py-2 text-center">Cộng HP</div>
-                  <div className="bg-rose-100 text-rose-900 rounded-2xl px-3 py-2 text-center">Trừ HP</div>
+                  <div className="bg-blue-100 text-blue-900 rounded-2xl px-3 py-2 text-center">Lượt Cá Ngựa</div>
                 </div>
               </div>
 
               <div className="space-y-5">
-                <div className="bg-white/90 rounded-3xl border border-fuchsia-100 p-5 shadow-sm">
+                <div className="bg-white/95 rounded-3xl border border-fuchsia-100 p-5 shadow-[0_0_24px_rgba(255,255,255,0.22)]">
                   <p className="text-[10px] font-black uppercase tracking-[0.25em] text-fuchsia-900 mb-3">Danh sách được quay</p>
                   <div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto custom-scrollbar pr-1">
                     {luckyWheelCandidateIds.map(id => {
@@ -3759,12 +4123,26 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-[32px] border-2 border-amber-200 p-6 min-h-[320px] flex flex-col items-center justify-center text-center shadow-xl">
+                <div className="bg-white rounded-[32px] border-2 border-amber-200 p-6 min-h-[360px] flex flex-col items-center justify-center text-center shadow-[0_0_36px_rgba(250,204,21,0.35)]">
+                  {!isLuckyWheelSpinning && !luckyWheelResult && (
+                    <div className="w-full space-y-5 animate-in zoom-in-95 duration-300">
+                      <div className="text-6xl drop-shadow">🎡</div>
+                      <h3 className="text-3xl font-royal text-fuchsia-900 uppercase">Sẵn sàng quay</h3>
+                      <p className="text-sm font-bold text-gray-500">Kết quả sẽ được random sau khi bấm nút bên dưới.</p>
+                      <button
+                        onClick={startLuckyWheelSpin}
+                        className="w-full bg-gradient-to-r from-amber-500 via-fuchsia-600 to-cyan-500 hover:brightness-110 text-white py-4 rounded-2xl font-black uppercase tracking-wider shadow-[0_0_28px_rgba(217,70,239,0.6)] transition-all"
+                      >
+                        Bắt Đầu Quay
+                      </button>
+                    </div>
+                  )}
+
                   {isLuckyWheelSpinning && (
                     <div className="space-y-4 animate-pulse">
                       <div className="text-6xl">🎡</div>
                       <h3 className="text-2xl font-royal text-fuchsia-900 uppercase">Đang quay...</h3>
-                      <p className="text-sm font-bold text-gray-500">Triều đình đang rút vận may, chờ bánh xe dừng hẳn nhé.</p>
+                      <p className="text-sm font-bold text-gray-500">Bánh xe đang tăng tốc rồi chậm lại trong 3 giây cuối.</p>
                     </div>
                   )}
 
@@ -3784,8 +4162,8 @@ const App: React.FC = () => {
 
                       <div className="bg-gradient-to-br from-amber-50 to-fuchsia-50 rounded-3xl border border-amber-200 p-5">
                         <div className="text-5xl mb-2">{luckyWheelResult.reward.icon}</div>
-                        <p className="text-xl font-black text-fuchsia-950">{luckyWheelResult.reward.label}</p>
-                        <p className="mt-2 text-sm font-bold text-gray-700">{luckyWheelResult.message}</p>
+                        <p className="text-2xl font-black text-fuchsia-950">{luckyWheelResult.reward.label}</p>
+                        <p className="mt-2 text-base font-black text-gray-700">{luckyWheelResult.message}</p>
 
                         {luckyWheelResult.pokemon && (
                           <img
@@ -3801,6 +4179,18 @@ const App: React.FC = () => {
                             <span className="text-2xl">{luckyWheelResult.skill.icon}</span>
                             <span>{luckyWheelResult.skill.name}</span>
                           </div>
+                        )}
+
+                        {luckyWheelResult.reward.type === 'ludo_rolls' && (
+                          <button
+                            onClick={() => {
+                              setShowLuckyWheelModal(false);
+                              openLudoForClass(luckyWheelResult.student.className, luckyWheelResult.student);
+                            }}
+                            className="mt-4 bg-blue-700 hover:bg-blue-800 text-white px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider shadow"
+                          >
+                            Mở Đường Đua Cá Ngựa
+                          </button>
                         )}
                       </div>
 
@@ -4049,6 +4439,9 @@ const App: React.FC = () => {
                       <div>
                         <h4 className="font-extrabold text-amber-950 text-sm">{ludoActiveStudent.name}</h4>
                         <p className="text-[10px] font-bold text-amber-800">Đang ở ô: {ludoPositions[ludoActiveStudent.id] || 0} / 50</p>
+                        {(ludoBonusRolls[ludoActiveStudent.id] || 0) > 0 && (
+                          <span className="text-[9px] font-black text-blue-700 bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded">🎁 Còn {ludoBonusRolls[ludoActiveStudent.id]} lượt lắc bonus</span>
+                        )}
                         {ludoMonsterStuck[ludoActiveStudent.id] && (
                           <span className="text-[9px] font-black text-red-600 bg-red-100 border border-red-200 px-1.5 py-0.5 rounded">👹 Đang bị Quái vật kẹt! Cần lắc xí ngầu 6</span>
                         )}
@@ -4066,10 +4459,17 @@ const App: React.FC = () => {
 
                 <button 
                   disabled={!ludoActiveStudent || ludoRolling}
-                  onClick={() => ludoActiveStudent && handleLudoRollDice(ludoActiveStudent)}
+                  onClick={() => {
+                    if (!ludoActiveStudent) return;
+                    handleLudoRollDice(ludoActiveStudent, { isBonusRoll: (ludoBonusRolls[ludoActiveStudent.id] || 0) > 0 });
+                  }}
                   className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white py-4 rounded-2xl font-black uppercase tracking-wider text-sm shadow-xl transition-all"
                 >
-                  {ludoRolling ? 'Đang Đổ Xí Ngầu...' : '🎲 Trả Lời Đúng & Lắc Xí Ngầu (+1đ)'}
+                  {ludoRolling
+                    ? 'Đang Đổ Xí Ngầu...'
+                    : ludoActiveStudent && (ludoBonusRolls[ludoActiveStudent.id] || 0) > 0
+                      ? `🎁 Lắc Bonus (còn ${ludoBonusRolls[ludoActiveStudent.id]} lượt)`
+                      : '🎲 Trả Lời Đúng & Lắc Xí Ngầu (+1đ)'}
                 </button>
               </div>
             </div>
@@ -4165,6 +4565,65 @@ const App: React.FC = () => {
             </div>
             
             <div className="text-[9px] uppercase font-bold text-amber-900/40 tracking-wider">Cung điện Hoàng Gia - Bảo học Linh thú đồng hành</div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: POKEMON RELEASED WHEN HP REACHES 0 */}
+      {pokemonReleaseEvent && (
+        <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/92 p-4 backdrop-blur-xl animate-in fade-in duration-300">
+          <div className="bg-emerald-50 max-w-2xl w-full rounded-[42px] border-[10px] border-emerald-700 p-6 sm:p-8 shadow-[0_0_90px_rgba(16,185,129,0.45)] text-center space-y-6 relative overflow-hidden">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(34,197,94,0.22),transparent_36%)] pointer-events-none" />
+            <div className="relative z-10 space-y-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.25em] text-emerald-800">Linh thú rời đội hình</p>
+              <h3 className="text-3xl sm:text-4xl font-royal text-emerald-950 uppercase">Đã thả về rừng</h3>
+
+              <div className="bg-white/85 rounded-[32px] border border-emerald-200 p-5 shadow-inner">
+                <img
+                  referrerPolicy="no-referrer"
+                  src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pokemonReleaseEvent.releasedPet.dexId}.png`}
+                  className="w-36 h-36 object-contain mx-auto drop-shadow-xl grayscale-[20%]"
+                  alt={pokemonReleaseEvent.releasedPet.name}
+                />
+                <p className="text-lg font-black text-emerald-950">
+                  {pokemonReleaseEvent.releasedPet.name} của {pokemonReleaseEvent.studentName} đã hết HP nên được thả về rừng để hồi phục tự nhiên.
+                </p>
+              </div>
+
+              {pokemonReleaseEvent.remainingPets.length > 0 ? (
+                <div className="space-y-3">
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-800">Chọn Pokémon đồng hành tiếp theo</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {pokemonReleaseEvent.remainingPets.map(pet => (
+                      <button
+                        key={`${pet.dexId}-${pet.name}-${pet.baseDexId || pet.dexId}`}
+                        onClick={() => handleSelectReplacementPokemon(pet)}
+                        className="bg-white hover:bg-emerald-50 border-2 border-emerald-200 hover:border-emerald-600 rounded-3xl p-3 transition-all shadow-sm"
+                      >
+                        <img
+                          referrerPolicy="no-referrer"
+                          src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pet.dexId}.png`}
+                          className="w-20 h-20 object-contain mx-auto"
+                          alt={pet.name}
+                        />
+                        <p className="text-xs font-black text-emerald-950 truncate">{pet.name}</p>
+                        <p className="text-[10px] font-bold text-emerald-700">HP {pet.hp ?? 100}/100</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-sm font-bold text-emerald-900">Học sinh này không còn Pokémon nào khác. Hãy mua trứng mới để tiếp tục ấp nở.</p>
+                  <button
+                    onClick={handleOpenEggAfterRelease}
+                    className="bg-emerald-700 hover:bg-emerald-800 text-white px-8 py-3.5 rounded-2xl font-black uppercase tracking-wider shadow-lg transition-all"
+                  >
+                    Mở màn mua trứng
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -1,11 +1,14 @@
 
-import { Gender, RankInfo, Skill } from './types';
+import { Gender, LuckyWheelReward, RankInfo, Skill } from './types';
 
 export const STORAGE_KEY = 'imperial_school_data_v6';
 export const RANKS_KEY_MALE = 'imperial_ranks_male_v6';
 export const RANKS_KEY_FEMALE = 'imperial_ranks_female_v6';
 export const SKILLS_KEY = 'imperial_skills_v6';
 export const PET_SKILLS_KEY = 'imperial_pet_skills_v1';
+export const LUCKY_WHEEL_REWARDS_KEY = 'imperial_lucky_wheel_rewards_v1';
+export const WHEEL_SPIN_SOUND_KEY = 'imperial_sound_wheel_spin';
+export const WHEEL_FINISH_SOUND_KEY = 'imperial_sound_wheel_finish';
 
 export const DEFAULT_RANKS_MALE: RankInfo[] = [
   { id: 'm1', level: -1, title: 'Nô tài', minPoints: -999, maxPoints: -1, color: 'text-gray-500', avatar: '' },
@@ -66,6 +69,44 @@ export const DEFAULT_SKILLS: Skill[] = [
   { id: 'n18', name: 'Nói bậy', icon: '🗑️', points: -5, type: 'negative' },
   { id: 'n19', name: 'Đi học muộn', icon: '💬', points: -3, type: 'negative' },
   { id: 'n20', name: 'Không mang sách vở', icon: '✈️', points: -4, type: 'negative' },
+];
+
+export const DEFAULT_LUCKY_WHEEL_REWARDS: LuckyWheelReward[] = [
+  ...Array.from({ length: 10 }, (_, idx) => ({
+    id: `points_plus_${idx + 1}`,
+    label: `Cộng ${idx + 1} điểm`,
+    icon: '✨',
+    type: 'points' as const,
+    amount: idx + 1,
+    color: idx % 2 === 0 ? '#16a34a' : '#22c55e'
+  })),
+  ...Array.from({ length: 10 }, (_, idx) => ({
+    id: `points_minus_${idx + 1}`,
+    label: `Trừ ${idx + 1} điểm`,
+    icon: '⚡',
+    type: 'points' as const,
+    amount: -(idx + 1),
+    color: idx % 2 === 0 ? '#dc2626' : '#f97316'
+  })),
+  { id: 'pokemon_gift_1', label: 'Tặng Pokemon', icon: '🎁', type: 'pokemon', color: '#f59e0b' },
+  { id: 'pokemon_gift_2', label: 'Tặng Pokemon hiếm', icon: '🥚', type: 'pokemon', color: '#d97706' },
+  { id: 'pokemon_gift_3', label: 'Tặng Pokemon mới', icon: '🌟', type: 'pokemon', color: '#fbbf24' },
+  { id: 'skill_gift_1', label: 'Tặng skill Pokemon', icon: '📜', type: 'skill', color: '#7c3aed' },
+  { id: 'skill_gift_2', label: 'Tặng bí kíp Pet', icon: '🔮', type: 'skill', color: '#9333ea' },
+  { id: 'skill_gift_3', label: 'Tặng tuyệt chiêu', icon: '💫', type: 'skill', color: '#a855f7' },
+  { id: 'hp_plus_5', label: 'Cộng 5 HP', icon: '❤️', type: 'hp', amount: 5, color: '#059669' },
+  { id: 'hp_plus_10', label: 'Cộng 10 HP', icon: '💚', type: 'hp', amount: 10, color: '#10b981' },
+  { id: 'hp_plus_15', label: 'Cộng 15 HP', icon: '💖', type: 'hp', amount: 15, color: '#34d399' },
+  { id: 'hp_plus_20', label: 'Cộng 20 HP', icon: '💎', type: 'hp', amount: 20, color: '#2dd4bf' },
+  { id: 'hp_minus_5', label: 'Trừ 5 HP', icon: '💔', type: 'hp', amount: -5, color: '#be123c' },
+  { id: 'hp_minus_10', label: 'Trừ 10 HP', icon: '🩹', type: 'hp', amount: -10, color: '#e11d48' },
+  { id: 'hp_minus_15', label: 'Trừ 15 HP', icon: '🔥', type: 'hp', amount: -15, color: '#ea580c' },
+  { id: 'hp_minus_20', label: 'Trừ 20 HP', icon: '🌩️', type: 'hp', amount: -20, color: '#b91c1c' },
+  { id: 'ludo_rolls_1', label: 'Lắc Cá Ngựa 1 lần', icon: '🎲', type: 'ludo_rolls', amount: 1, color: '#2563eb' },
+  { id: 'ludo_rolls_2', label: 'Lắc Cá Ngựa 2 lần', icon: '🎲', type: 'ludo_rolls', amount: 2, color: '#0ea5e9' },
+  { id: 'ludo_rolls_3', label: 'Lắc Cá Ngựa 3 lần', icon: '🎲', type: 'ludo_rolls', amount: 3, color: '#0891b2' },
+  { id: 'ludo_rolls_4', label: 'Lắc Cá Ngựa 4 lần', icon: '🎲', type: 'ludo_rolls', amount: 4, color: '#7c3aed' },
+  { id: 'ludo_rolls_5', label: 'Lắc Cá Ngựa 5 lần', icon: '🎲', type: 'ludo_rolls', amount: 5, color: '#c026d3' }
 ];
 
 export const DEFAULT_LUDO_TILES: Record<number, { tileIndex: number; title: string; desc: string; icon: string; type: 'portal' | 'curse' | 'treasure' | 'monster' | 'restart'; value?: number }> = {

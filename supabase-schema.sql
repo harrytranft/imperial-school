@@ -20,7 +20,10 @@ create table if not exists public.user_settings (
   pos_sound_url text not null default '',
   neg_sound_url text not null default '',
   timer_sound_url text not null default '',
+  wheel_spin_sound_url text not null default '',
+  wheel_finish_sound_url text not null default '',
   custom_ludo_tiles jsonb not null default '{}'::jsonb,
+  lucky_wheel_rewards jsonb not null default '[]'::jsonb,
   updated_at_ms bigint not null default ((extract(epoch from now()) * 1000)::bigint),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -28,6 +31,15 @@ create table if not exists public.user_settings (
 
 alter table public.user_settings
 add column if not exists pet_skills jsonb not null default '[]'::jsonb;
+
+alter table public.user_settings
+add column if not exists wheel_spin_sound_url text not null default '';
+
+alter table public.user_settings
+add column if not exists wheel_finish_sound_url text not null default '';
+
+alter table public.user_settings
+add column if not exists lucky_wheel_rewards jsonb not null default '[]'::jsonb;
 
 alter table public.profiles enable row level security;
 alter table public.user_settings enable row level security;
