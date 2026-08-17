@@ -74,6 +74,17 @@
   - Upgraded Pokémon Profile hero with species, HP, Passive, Evolution Preview, and clearer Level/XP/Bond/Charge hierarchy.
   - Upgraded owned collection cards with Level, HP, Bond, and shiny markers.
 - Verified production build with `npm run build` after Pokémon Companion System 2.0 Phase 5 changes.
+- Added Pokémon Companion System 2.0 follow-up adjustments:
+  - Homework Done now grants +8 Hào Quang and heals the active Pokémon by +8 HP while keeping Homework Streak, XP, Bond, and egg progress behavior.
+  - Pokémon reaction toast now stays visible for 10 seconds, includes a close button, and closes when clicking outside.
+  - Pokémon level-up events now also show a centered Level Up modal.
+  - Battle results now create ordered Cá Ngựa turns: winner first, loser second only when the loser score is not negative.
+  - Cá Ngựa now displays the ordered Battle queue directly instead of requiring a manual dropdown selection for those turns.
+  - Reaching the final Cá Ngựa tile or finishing a lap opens Lucky Wheel for that student with a 60% good reward / 40% bad reward weighting.
+  - Pokémon normalization now recalculates evolution from Pokémon XP/Level instead of preserving old Hào Quang-based evolved forms.
+  - Student cards now show current Answer, Battle, and Homework streak badges when active.
+  - Rebuilt `docs/pokemon-companion-2-intro.html` as a clearer liquid-glass student-facing feature guide with keyboard navigation.
+- Verified production build with `npm run build` after the follow-up adjustments.
 
 ## Manual Steps Needed
 

@@ -55,6 +55,16 @@ interface PokemonReleaseEvent {
   cause?: string;
 }
 
+interface LevelUpAnnouncement {
+  title: string;
+  events: PokemonUiEvent[];
+}
+
+interface BattleLudoTurn {
+  studentId: string;
+  role: 'winner' | 'loser' | 'draw';
+}
+
 const getLocalDateKey = (date = new Date()) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -279,6 +289,7 @@ const App: React.FC = () => {
   const [feedbackSource, setFeedbackSource] = useState<GameEventSource>('manual');
   const [pokemonReactionEvents, setPokemonReactionEvents] = useState<PokemonUiEvent[]>([]);
   const [pokemonReactionTitle, setPokemonReactionTitle] = useState('Tiến triển Pokémon');
+  const [levelUpAnnouncement, setLevelUpAnnouncement] = useState<LevelUpAnnouncement | null>(null);
   const pokemonReactionTimerRef = useRef<number | null>(null);
   
   const [searchQuery, setSearchQuery] = useState('');
@@ -306,6 +317,7 @@ const App: React.FC = () => {
     scoreB: number;
     diff: number;
     resultMsg: string;
+    ludoTurns: BattleLudoTurn[];
   } | null>(null);
   const [uncalledMap, setUncalledMap] = useState<Record<string, string[]>>({}); // Fair round-robin random queue
 
@@ -316,6 +328,7 @@ const App: React.FC = () => {
   const [luckyWheelResult, setLuckyWheelResult] = useState<LuckyWheelResult | null>(null);
   const [luckyWheelPendingResult, setLuckyWheelPendingResult] = useState<LuckyWheelResult | null>(null);
   const [luckyWheelCandidateIds, setLuckyWheelCandidateIds] = useState<string[]>([]);
+  const [luckyWheelMode, setLuckyWheelMode] = useState<'normal' | 'ludo-finish'>('normal');
   const [luckyWheelRewards, setLuckyWheelRewards] = useState<LuckyWheelReward[]>(() => {
     const saved = localStorage.getItem(LUCKY_WHEEL_REWARDS_KEY);
     if (saved) {
@@ -345,6 +358,7 @@ const App: React.FC = () => {
   const [ludoPopup, setLudoPopup] = useState<{ title: string; desc: string; icon: string } | null>(null);
   const [ludoLogs, setLudoLogs] = useState<string[]>([]);
   const [ludoBonusRolls, setLudoBonusRolls] = useState<Record<string, number>>({});
+  const [battleLudoQueue, setBattleLudoQueue] = useState<BattleLudoTurn[]>([]);
   const [ludoEventPopup, setLudoEventPopup] = useState<{
     title: string;
     message: string;
@@ -457,10 +471,17 @@ const App: React.FC = () => {
     }
     setPokemonReactionTitle(title);
     setPokemonReactionEvents(events.slice(0, 4));
+    const levelEvents = events.filter(event => event.type === 'level-up');
+    if (levelEvents.length > 0) {
+      setLevelUpAnnouncement({
+        title,
+        events: levelEvents.slice(0, 3)
+      });
+    }
     pokemonReactionTimerRef.current = window.setTimeout(() => {
       setPokemonReactionEvents([]);
       pokemonReactionTimerRef.current = null;
-    }, 1200);
+    }, 10000);
   };
 
   // Sync state FROM Supabase on login (high priority)
@@ -871,6 +892,23 @@ const App: React.FC = () => {
     setShowLudoModal(true);
   };
 
+  const openBattleLudoTurns = (turns: BattleLudoTurn[]) => {
+    const validTurns = turns
+      .map(turn => {
+        const student = students.find(s => s.id === turn.studentId);
+        return student && !student.isAbsent ? { turn, student } : null;
+      })
+      .filter(Boolean) as { turn: BattleLudoTurn; student: Student }[];
+
+    if (validTurns.length === 0) {
+      alert("Không có học sinh hợp lệ để lắc Cá Ngựa sau Battle.");
+      return;
+    }
+
+    setBattleLudoQueue(validTurns.map(item => item.turn));
+    openLudoForClass(validTurns[0].student.className, validTurns[0].student);
+  };
+
   const getRandomIndex = (length: number) => {
     if (length <= 0) return 0;
     if (window.crypto?.getRandomValues) {
@@ -888,6 +926,45 @@ const App: React.FC = () => {
       [next[i], next[j]] = [next[j], next[i]];
     }
     return next;
+  };
+
+  const isGoodLuckyWheelReward = (reward: LuckyWheelReward) => {
+    if (reward.type === 'points' || reward.type === 'hp') return (reward.amount || 0) > 0;
+    return reward.type === 'pokemon' || reward.type === 'skill' || reward.type === 'ludo_rolls';
+  };
+
+  const getWeightedLudoFinishRewards = () => {
+    const sourceRewards = luckyWheelRewards.length > 0 ? luckyWheelRewards : DEFAULT_LUCKY_WHEEL_REWARDS;
+    const goodRewards = sourceRewards.filter(isGoodLuckyWheelReward);
+    const badRewards = sourceRewards.filter(reward => !isGoodLuckyWheelReward(reward) && (reward.type === 'points' || reward.type === 'hp'));
+    return {
+      goodRewards,
+      badRewards,
+      displayRewards: shuffleLuckyWheelRewards([...goodRewards, ...badRewards])
+    };
+  };
+
+  const chooseLuckyWheelReward = (validRewards: LuckyWheelReward[]) => {
+    if (luckyWheelMode !== 'ludo-finish') return validRewards[getRandomIndex(validRewards.length)];
+
+    const goodRewards = validRewards.filter(isGoodLuckyWheelReward);
+    const badRewards = validRewards.filter(reward => !isGoodLuckyWheelReward(reward) && (reward.type === 'points' || reward.type === 'hp'));
+    const preferGood = getRandomIndex(100) < 60;
+    const preferredPool = preferGood ? goodRewards : badRewards;
+    const fallbackPool = preferGood ? badRewards : goodRewards;
+    const pool = preferredPool.length > 0 ? preferredPool : fallbackPool.length > 0 ? fallbackPool : validRewards;
+    return pool[getRandomIndex(pool.length)];
+  };
+
+  const openLuckyWheelForLudoFinish = (student: Student) => {
+    if (isLuckyWheelSpinning) return;
+    const { displayRewards } = getWeightedLudoFinishRewards();
+    setLuckyWheelMode('ludo-finish');
+    setLuckyWheelCandidateIds([student.id]);
+    setLuckyWheelDisplayRewards(displayRewards);
+    setLuckyWheelPendingResult(null);
+    setLuckyWheelResult(null);
+    setShowLuckyWheelModal(true);
   };
 
   const isSamePokemon = (a?: PokemonPet, b?: PokemonPet) => {
@@ -1591,8 +1668,8 @@ const App: React.FC = () => {
       const baseStudent = normalizeStudentPokemonData(student);
       const historyItem: HistoryItem = {
         id: timestamp.toString() + Math.random(),
-        amount: 0,
-        reason: status === 'done' ? `📚 Homework Done (${homeworkLessonDateKey})` : `📚 Homework Missing (${homeworkLessonDateKey})`,
+        amount: status === 'done' ? 8 : 0,
+        reason: status === 'done' ? `📚 Homework Done (${homeworkLessonDateKey}) (+8 Hào Quang, Pokémon +8 HP)` : `📚 Homework Missing (${homeworkLessonDateKey})`,
         timestamp
       };
 
@@ -1612,6 +1689,10 @@ const App: React.FC = () => {
       }
 
       doneCount += 1;
+      const rewardedStudent = {
+        ...baseStudent,
+        points: baseStudent.points + 8
+      };
       const result = applyGameEventToStudent(baseStudent, {
         type: 'HOMEWORK_COMPLETE',
         source: 'homework',
@@ -1619,16 +1700,25 @@ const App: React.FC = () => {
         lessonKey,
         timestamp
       });
+      let resultStudent = {
+        ...result.student,
+        points: rewardedStudent.points
+      };
+      if (resultStudent.pet) {
+        const hpUpdate = applyPetHpDelta(resultStudent, 8, 'Homework Done: hồi 8 HP');
+        resultStudent = hpUpdate.student;
+        uiEvents.push({ type: 'hp', message: `${student.name}: Pokémon +8 HP` });
+      }
       uiEvents.push(...result.uiEvents);
 
-      const nextEgg = !result.student.pet && result.student.egg?.status === 'egg'
-        ? { ...result.student.egg, progress: Math.min(10, result.student.egg.progress + 1) }
-        : result.student.egg;
+      const nextEgg = !resultStudent.pet && resultStudent.egg?.status === 'egg'
+        ? { ...resultStudent.egg, progress: Math.min(10, resultStudent.egg.progress + 1) }
+        : resultStudent.egg;
 
       return {
-        ...result.student,
+        ...resultStudent,
         egg: nextEgg,
-        history: [historyItem, ...result.student.history].slice(0, 50)
+        history: [historyItem, ...resultStudent.history].slice(0, 50)
       };
     });
 
@@ -1642,7 +1732,7 @@ const App: React.FC = () => {
 
     const summaryEvents: PokemonUiEvent[] = [
       { type: 'bond', message: `${doneCount} Done · ${missingCount} Missing${skippedCount ? ` · ${skippedCount} đã chốt` : ''}` },
-      ...uiEvents.filter(event => ['xp', 'bond', 'streak', 'passive', 'level-up', 'evolution', 'mastery'].includes(event.type)).slice(0, 3)
+      ...uiEvents.filter(event => ['xp', 'bond', 'hp', 'streak', 'passive', 'level-up', 'evolution', 'mastery'].includes(event.type)).slice(0, 3)
     ];
     showPokemonReaction(summaryEvents, 'Homework Check đã chốt');
   };
@@ -1873,6 +1963,7 @@ const App: React.FC = () => {
 
     setLuckyWheelCandidateIds(candidates.map(s => s.id));
     const shuffledRewards = shuffleLuckyWheelRewards(luckyWheelRewards.length > 0 ? luckyWheelRewards : DEFAULT_LUCKY_WHEEL_REWARDS);
+    setLuckyWheelMode('normal');
     setLuckyWheelDisplayRewards(shuffledRewards);
     setLuckyWheelPendingResult(null);
     setLuckyWheelResult(null);
@@ -1896,7 +1987,7 @@ const App: React.FC = () => {
     }
 
     const displayRewards = luckyWheelDisplayRewards.length > 0 ? luckyWheelDisplayRewards : shuffleLuckyWheelRewards(luckyWheelRewards);
-    const chosenReward = validRewards[getRandomIndex(validRewards.length)];
+    const chosenReward = chooseLuckyWheelReward(validRewards);
     const preparedResult = prepareLuckyWheelResult(chosenStudent, chosenReward);
     const rewardIndex = Math.max(0, displayRewards.findIndex(reward => reward.id === chosenReward.id));
     const segmentSize = 360 / Math.max(1, displayRewards.length);
@@ -2068,6 +2159,23 @@ const App: React.FC = () => {
 
     const updatedA = updatedStudents.find(s => s.id === battleStudentA.id) || battleStudentA;
     const updatedB = updatedStudents.find(s => s.id === battleStudentB.id) || battleStudentB;
+    let ludoTurns: BattleLudoTurn[] = [];
+    if (scoreA > scoreB) {
+      ludoTurns = [
+        { studentId: updatedA.id, role: 'winner' },
+        ...(scoreB >= 0 ? [{ studentId: updatedB.id, role: 'loser' as const }] : [])
+      ];
+    } else if (scoreB > scoreA) {
+      ludoTurns = [
+        { studentId: updatedB.id, role: 'winner' },
+        ...(scoreA >= 0 ? [{ studentId: updatedA.id, role: 'loser' as const }] : [])
+      ];
+    } else {
+      ludoTurns = [
+        ...(scoreA >= 0 ? [{ studentId: updatedA.id, role: 'draw' as const }] : []),
+        ...(scoreB >= 0 ? [{ studentId: updatedB.id, role: 'draw' as const }] : [])
+      ];
+    }
     setBattleStudentA(updatedA);
     setBattleStudentB(updatedB);
 
@@ -2078,7 +2186,8 @@ const App: React.FC = () => {
       scoreA,
       scoreB,
       diff,
-      resultMsg
+      resultMsg,
+      ludoTurns
     });
   };
 
@@ -2299,6 +2408,16 @@ const App: React.FC = () => {
       const roll = Math.floor(Math.random() * 6) + 1;
       setLudoDice(roll);
       setLudoRolling(false);
+      const advanceBattleQueue = (nextStudents: Student[]) => {
+        setBattleLudoQueue(prev => {
+          if (prev.length === 0) return prev;
+          const nextQueue = prev.filter(turn => turn.studentId !== student.id);
+          const nextTurn = nextQueue[0];
+          const nextStudent = nextTurn ? nextStudents.find(s => s.id === nextTurn.studentId) || null : null;
+          setLudoActiveStudent(nextStudent);
+          return nextQueue;
+        });
+      };
 
       const isStuck = !!ludoMonsterStuck[student.id];
       if (isStuck) {
@@ -2311,6 +2430,8 @@ const App: React.FC = () => {
             icon: '👹',
             type: 'monster'
           });
+          setStudents(updatedStudents);
+          advanceBattleQueue(updatedStudents);
           return;
         } else {
           setLudoMonsterStuck(prev => ({ ...prev, [student.id]: false }));
@@ -2327,9 +2448,11 @@ const App: React.FC = () => {
 
       const logs: string[] = [`🎲 ${student.name} tung được ${roll} điểm, tiến đến ô số ${newPos}!`];
       let popupEvent: any = null;
+      let reachedFinishReward = newPos === 49;
 
       // Lap completion check (+20 points)
       if (newLap > oldLap) {
+        reachedFinishReward = true;
         updatedStudents = updatedStudents.map(s => {
           if (s.id === student.id) {
             return {
@@ -2465,6 +2588,10 @@ const App: React.FC = () => {
           }
         }
       }
+      if (newPos === 49) {
+        reachedFinishReward = true;
+        logs.unshift(`🎡 ${student.name} đã đến ô cuối cùng! Mở Vòng quay may mắn với tỉ lệ 60% quà tốt / 40% quà thử thách.`);
+      }
 
       setLudoSteps(prev => ({ ...prev, [student.id]: newSteps }));
       setLudoPositions(prev => ({ ...prev, [student.id]: newPos }));
@@ -2484,9 +2611,14 @@ const App: React.FC = () => {
 
       setStudents(updatedStudents);
       setLudoLogs(prev => [...logs, ...prev].slice(0, 40));
+      advanceBattleQueue(updatedStudents);
 
       if (popupEvent) {
         setLudoEventPopup(popupEvent);
+      }
+      if (reachedFinishReward) {
+        const latestStudent = updatedStudents.find(s => s.id === student.id) || student;
+        window.setTimeout(() => openLuckyWheelForLudoFinish(latestStudent), 900);
       }
     }, 600);
   };
@@ -2700,7 +2832,49 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_50%_0%,#fffbf2_0%,#f5ebe0_100%)] pb-32">
-      <PokemonReactionToast events={pokemonReactionEvents} title={pokemonReactionTitle} />
+      <PokemonReactionToast
+        events={pokemonReactionEvents}
+        title={pokemonReactionTitle}
+        onClose={() => {
+          if (pokemonReactionTimerRef.current) {
+            window.clearTimeout(pokemonReactionTimerRef.current);
+            pokemonReactionTimerRef.current = null;
+          }
+          setPokemonReactionEvents([]);
+        }}
+      />
+
+      {levelUpAnnouncement && (
+        <div
+          className="fixed inset-0 z-[330] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm animate-in fade-in duration-200"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setLevelUpAnnouncement(null);
+          }}
+        >
+          <div className="relative w-full max-w-lg overflow-hidden rounded-[36px] border-4 border-amber-300 bg-white p-8 text-center shadow-[0_30px_90px_rgba(245,158,11,0.45)] animate-in zoom-in-95 duration-200">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(251,191,36,0.35),transparent_42%)] pointer-events-none" />
+            <button
+              onClick={() => setLevelUpAnnouncement(null)}
+              className="absolute right-4 top-4 z-10 grid h-9 w-9 place-items-center rounded-full border border-amber-200 bg-white text-sm font-black text-amber-900 hover:bg-amber-50"
+              aria-label="Tắt thông báo level up"
+            >
+              ×
+            </button>
+            <div className="relative z-10 space-y-4">
+              <div className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-amber-100 text-5xl ring-8 ring-amber-200/60">⭐</div>
+              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-amber-700">{levelUpAnnouncement.title}</p>
+              <h2 className="font-royal text-4xl uppercase text-amber-950">Level Up!</h2>
+              <div className="space-y-2">
+                {levelUpAnnouncement.events.map((event, index) => (
+                  <p key={`${event.message}-${index}`} className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-950">
+                    {event.message}
+                  </p>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* NAVIGATION BAR */}
       <div className="fixed top-0 left-0 right-0 z-40 h-5 group/nav">
@@ -4094,31 +4268,42 @@ const App: React.FC = () => {
                       </p>
                     </div>
 
-                    {/* Both students can roll Cá Ngựa buttons */}
+                    {/* Ordered Cá Ngựa turns after Battle */}
                     <div className="bg-white p-4 rounded-2xl border-2 border-amber-300 space-y-3">
                       <p className="text-xs font-black uppercase text-amber-950 tracking-wider text-center">
-                        🎲 Luân Phiên Lắc Cá Ngựa (Cả 2 Học Sinh Đều Được Lắc):
+                        🎲 Thứ Tự Lắc Cá Ngựa Sau Battle:
                       </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <button
-                          onClick={() => {
-                            setShowRandomModal(false);
-                            openLudoForClass(battleResultSummary.studentA.className, battleResultSummary.studentA);
-                          }}
-                          className="bg-amber-600 hover:bg-amber-700 text-white p-3 rounded-xl font-black text-xs uppercase tracking-wider shadow-md flex items-center justify-center gap-2 transition-all border-2 border-amber-400"
-                        >
-                          <span>🎲</span> Cho {battleResultSummary.studentA.name} Lắc Cá Ngựa
-                        </button>
-                        <button
-                          onClick={() => {
-                            setShowRandomModal(false);
-                            openLudoForClass(battleResultSummary.studentB.className, battleResultSummary.studentB);
-                          }}
-                          className="bg-purple-600 hover:bg-purple-700 text-white p-3 rounded-xl font-black text-xs uppercase tracking-wider shadow-md flex items-center justify-center gap-2 transition-all border-2 border-purple-400"
-                        >
-                          <span>🎲</span> Cho {battleResultSummary.studentB.name} Lắc Cá Ngựa
-                        </button>
-                      </div>
+                      {battleResultSummary.ludoTurns.length > 0 ? (
+                        <>
+                          <div className="space-y-2">
+                            {battleResultSummary.ludoTurns.map((turn, index) => {
+                              const turnStudent = [battleResultSummary.studentA, battleResultSummary.studentB].find(s => s.id === turn.studentId);
+                              if (!turnStudent) return null;
+                              return (
+                                <div key={`${turn.studentId}-${index}`} className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                                  <span className="text-xs font-black text-amber-950">{index + 1}. {turnStudent.name}</span>
+                                  <span className="text-[10px] font-black uppercase text-amber-700">
+                                    {turn.role === 'winner' ? 'Thắng - lắc trước' : turn.role === 'loser' ? 'Thua - lắc sau' : 'Hòa'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <button
+                            onClick={() => {
+                              setShowRandomModal(false);
+                              openBattleLudoTurns(battleResultSummary.ludoTurns);
+                            }}
+                            className="w-full bg-amber-600 hover:bg-amber-700 text-white p-3 rounded-xl font-black text-xs uppercase tracking-wider shadow-md flex items-center justify-center gap-2 transition-all border-2 border-amber-400"
+                          >
+                            <span>🎲</span> Mở Cá Ngựa Theo Thứ Tự
+                          </button>
+                        </>
+                      ) : (
+                        <p className="rounded-xl bg-rose-50 p-3 text-center text-xs font-black text-rose-700">
+                          Không có lượt Cá Ngựa hợp lệ vì điểm Battle bị âm.
+                        </p>
+                      )}
                     </div>
 
                     <div className="flex gap-3">
@@ -4260,13 +4445,21 @@ const App: React.FC = () => {
       {showLuckyWheelModal && (
         <div
           onClick={(e) => {
-            if (e.target === e.currentTarget && !isLuckyWheelSpinning) setShowLuckyWheelModal(false);
+            if (e.target === e.currentTarget && !isLuckyWheelSpinning) {
+              setLuckyWheelMode('normal');
+              setShowLuckyWheelModal(false);
+            }
           }}
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 backdrop-blur-md overflow-y-auto"
         >
           <div className="bg-[#17051f] w-full max-w-5xl rounded-[40px] shadow-[0_0_80px_rgba(217,70,239,0.55)] overflow-hidden animate-in zoom-in duration-300 relative border-4 border-fuchsia-500 my-auto">
             <button
-              onClick={() => !isLuckyWheelSpinning && setShowLuckyWheelModal(false)}
+              onClick={() => {
+                if (!isLuckyWheelSpinning) {
+                  setLuckyWheelMode('normal');
+                  setShowLuckyWheelModal(false);
+                }
+              }}
               disabled={isLuckyWheelSpinning}
               className="absolute top-5 right-5 text-3xl text-white/70 hover:text-white disabled:opacity-30 transition-colors z-20"
             >
@@ -4282,7 +4475,11 @@ const App: React.FC = () => {
                 <div>
                   <h2 className="text-2xl sm:text-3xl font-royal uppercase tracking-wider text-amber-200">Vòng Quay May Mắn</h2>
                   <p className="text-xs sm:text-sm text-fuchsia-100 font-bold mt-1">
-                    {isLuckyWheelSpinning ? 'Đang quay trong 10 giây...' : 'Bấm quay để bắt đầu chọn học sĩ và phần thưởng ngẫu nhiên.'}
+                    {isLuckyWheelSpinning
+                      ? 'Đang quay trong 10 giây...'
+                      : luckyWheelMode === 'ludo-finish'
+                        ? 'Cán đích Cá Ngựa: 60% quà tốt, 40% quà thử thách.'
+                        : 'Bấm quay để bắt đầu chọn học sĩ và phần thưởng ngẫu nhiên.'}
                   </p>
                 </div>
               </div>
@@ -4357,7 +4554,11 @@ const App: React.FC = () => {
                     <div className="w-full space-y-5 animate-in zoom-in-95 duration-300">
                       <div className="text-6xl drop-shadow">🎡</div>
                       <h3 className="text-3xl font-royal text-fuchsia-900 uppercase">Sẵn sàng quay</h3>
-                      <p className="text-sm font-bold text-gray-500">Kết quả sẽ được random sau khi bấm nút bên dưới.</p>
+                      <p className="text-sm font-bold text-gray-500">
+                        {luckyWheelMode === 'ludo-finish'
+                          ? 'Lượt cán đích ưu tiên 60% phần quà tốt và 40% phần quà không tốt.'
+                          : 'Kết quả sẽ được random sau khi bấm nút bên dưới.'}
+                      </p>
                       <button
                         onClick={startLuckyWheelSpin}
                         className="w-full bg-gradient-to-r from-amber-500 via-fuchsia-600 to-cyan-500 hover:brightness-110 text-white py-4 rounded-2xl font-black uppercase tracking-wider shadow-[0_0_28px_rgba(217,70,239,0.6)] transition-all"
@@ -4421,6 +4622,7 @@ const App: React.FC = () => {
                         {luckyWheelResult.reward.type === 'ludo_rolls' && (
                           <button
                             onClick={() => {
+                              setLuckyWheelMode('normal');
                               setShowLuckyWheelModal(false);
                               openLudoForClass(luckyWheelResult.student.className, luckyWheelResult.student);
                             }}
@@ -4432,7 +4634,10 @@ const App: React.FC = () => {
                       </div>
 
                       <button
-                        onClick={() => setShowLuckyWheelModal(false)}
+                        onClick={() => {
+                          setLuckyWheelMode('normal');
+                          setShowLuckyWheelModal(false);
+                        }}
                         className="w-full bg-fuchsia-800 hover:bg-fuchsia-900 text-white py-3.5 rounded-2xl font-black uppercase tracking-wider shadow-lg transition-all"
                       >
                         Hoàn tất
@@ -4556,7 +4761,7 @@ const App: React.FC = () => {
                 <p className="text-[10px] text-amber-200">Lớp {activeLudoClassName || 'Chưa chọn'} - chỉ học sinh cùng lớp đua với nhau.</p>
               </div>
             </div>
-            <button onClick={() => setShowLudoModal(false)} className="bg-amber-800 hover:bg-amber-700 text-white px-5 py-2 rounded-xl font-bold text-xs uppercase tracking-wider border border-amber-600">
+            <button onClick={() => { setBattleLudoQueue([]); setShowLudoModal(false); }} className="bg-amber-800 hover:bg-amber-700 text-white px-5 py-2 rounded-xl font-bold text-xs uppercase tracking-wider border border-amber-600">
               ← Quay Lại Lớp
             </button>
           </div>
@@ -4572,6 +4777,7 @@ const App: React.FC = () => {
                     onChange={e => {
                       setLudoClassName(e.target.value);
                       setLudoActiveStudent(null);
+                      setBattleLudoQueue([]);
                       setLudoDice(null);
                     }}
                     className="bg-amber-100 text-amber-950 border border-amber-300 px-3 py-1.5 rounded-xl text-xs font-black outline-none"
@@ -4655,20 +4861,40 @@ const App: React.FC = () => {
                 <h3 className="font-extrabold text-amber-950 text-lg border-b border-amber-200 pb-3 mb-4">Lượt Đua Tiếp Theo</h3>
 
                 <div className="space-y-3">
-                  <label className="text-[10px] font-black uppercase text-amber-900 block">Chọn Học Sinh Trả Lời Đúng:</label>
-                  <select 
-                    value={ludoActiveStudent?.id || ''} 
-                    onChange={e => {
-                      const st = ludoRaceStudents.find(s => s.id === e.target.value) || null;
-                      setLudoActiveStudent(st);
-                    }}
-                    className="w-full border-2 border-amber-300 p-3 rounded-2xl text-sm font-bold outline-none bg-amber-50/50"
-                  >
-                    <option value="">-- Chọn học sinh lắc xí ngầu --</option>
-                    {ludoRaceStudents.map(s => (
-                      <option key={s.id} value={s.id}>{s.name} ({s.className}) - Ô {ludoPositions[s.id] || 0}</option>
-                    ))}
-                  </select>
+                  {battleLudoQueue.length > 0 ? (
+                    <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-3">
+                      <p className="mb-2 text-[10px] font-black uppercase tracking-wider text-amber-900">Queue Battle tự động</p>
+                      <div className="space-y-1.5">
+                        {battleLudoQueue.map((turn, index) => {
+                          const queuedStudent = ludoRaceStudents.find(s => s.id === turn.studentId) || students.find(s => s.id === turn.studentId);
+                          if (!queuedStudent) return null;
+                          return (
+                            <div key={`${turn.studentId}-${index}`} className={`flex items-center justify-between rounded-xl px-2.5 py-2 text-xs font-black ${index === 0 ? 'bg-amber-600 text-white' : 'bg-white text-amber-950 border border-amber-200'}`}>
+                              <span>{index + 1}. {queuedStudent.name}</span>
+                              <span className="text-[9px] uppercase">{turn.role === 'winner' ? 'Thắng' : turn.role === 'loser' ? 'Thua' : 'Hòa'}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <label className="text-[10px] font-black uppercase text-amber-900 block">Chọn Học Sinh Trả Lời Đúng:</label>
+                      <select
+                        value={ludoActiveStudent?.id || ''}
+                        onChange={e => {
+                          const st = ludoRaceStudents.find(s => s.id === e.target.value) || null;
+                          setLudoActiveStudent(st);
+                        }}
+                        className="w-full border-2 border-amber-300 p-3 rounded-2xl text-sm font-bold outline-none bg-amber-50/50"
+                      >
+                        <option value="">-- Chọn học sinh lắc xí ngầu --</option>
+                        {ludoRaceStudents.map(s => (
+                          <option key={s.id} value={s.id}>{s.name} ({s.className}) - Ô {ludoPositions[s.id] || 0}</option>
+                        ))}
+                      </select>
+                    </>
+                  )}
 
                   {ludoActiveStudent && (
                     <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 flex items-center gap-3">

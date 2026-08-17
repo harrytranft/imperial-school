@@ -18,6 +18,12 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
 
   const egg = student.egg;
   const pet = student.pet;
+  const progress = student.pokemonProgress;
+  const streakBadges = [
+    { key: 'answer', label: 'Answer', value: progress?.answerStreak || 0, tone: 'bg-sky-50 text-sky-700 border-sky-200' },
+    { key: 'battle', label: 'Battle', value: progress?.battleWinStreak || 0, tone: 'bg-violet-50 text-violet-700 border-violet-200' },
+    { key: 'homework', label: 'Homework', value: progress?.homeworkStreak || 0, tone: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
+  ].filter(badge => badge.value > 0);
 
   // Helper to determine egg appearance based on hatch progress
   const getEggStatusText = (progress: number) => {
@@ -114,6 +120,15 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
             <h3 className="text-xl font-bold text-gray-800 truncate">{student.name}</h3>
           </div>
           <p className={`text-[10px] uppercase font-black tracking-widest ${rank.color}`}>{rank.title}</p>
+          {streakBadges.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {streakBadges.map(badge => (
+                <span key={badge.key} className={`rounded-full border px-2 py-0.5 text-[8px] font-black uppercase tracking-tight ${badge.tone}`}>
+                  {badge.label} x{badge.value}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

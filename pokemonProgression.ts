@@ -57,6 +57,33 @@ export const totalXpForLevel = (level: number): number => {
   return total;
 };
 
+export const getLevelProgressFromTotalXp = (totalXpValue: number): { level: number; xp: number; masteryXp: number; masteryStars: number } => {
+  let remainingXp = Math.max(0, Math.floor(totalXpValue));
+  let level = 1;
+
+  while (level < MAX_NORMAL_LEVEL && remainingXp >= xpNeededForNextLevel(level)) {
+    remainingXp -= xpNeededForNextLevel(level);
+    level += 1;
+  }
+
+  if (level >= MAX_NORMAL_LEVEL) {
+    const masteryXp = Math.max(0, remainingXp);
+    return {
+      level: MAX_NORMAL_LEVEL,
+      xp: 0,
+      masteryXp,
+      masteryStars: getMasteryStarsForXp(masteryXp)
+    };
+  }
+
+  return {
+    level,
+    xp: remainingXp,
+    masteryXp: 0,
+    masteryStars: 0
+  };
+};
+
 export const getMasteryStarsForXp = (masteryXp: number): number => {
   return MASTERY_STAR_THRESHOLDS.filter(threshold => masteryXp >= threshold).length;
 };
@@ -159,10 +186,9 @@ export const isSamePokemonPet = (a?: PokemonPet, b?: PokemonPet): boolean => {
 export const normalizePokemonPet = (pet: PokemonPet): PokemonPet => {
   const baseDexId = pet.baseDexId || findBaseDexIdForDexId(pet.dexId) || pet.dexId;
   const currentSpecies = getSpeciesForDexId(pet.dexId, baseDexId);
-  const stage = findEvolutionStageForDexId(baseDexId, pet.dexId, pet.speciesName);
-  const inferredLevel = STAGE_MIN_LEVELS[stage] || 1;
-  const level = clamp(pet.level ?? inferredLevel, inferredLevel, MAX_NORMAL_LEVEL);
-  const xp = Math.max(0, pet.xp ?? 0);
+  const progressFromTotal = pet.totalXp !== undefined ? getLevelProgressFromTotalXp(pet.totalXp) : undefined;
+  const level = clamp(progressFromTotal?.level ?? pet.level ?? 1, 1, MAX_NORMAL_LEVEL);
+  const xp = Math.max(0, progressFromTotal?.xp ?? pet.xp ?? 0);
   const totalXp = Math.max(totalXpForLevel(level) + xp, pet.totalXp ?? 0);
   const speciesName = pet.speciesName || currentSpecies.name;
   const existingName = pet.name || speciesName;
@@ -170,7 +196,7 @@ export const normalizePokemonPet = (pet: PokemonPet): PokemonPet => {
   const instanceId = pet.instanceId || createPokemonInstanceId();
   const evolved = getEvolvedFormForLevel(baseDexId, level, instanceId);
 
-  const masteryXp = Math.max(0, pet.masteryXp ?? 0);
+  const masteryXp = Math.max(0, progressFromTotal?.masteryXp ?? pet.masteryXp ?? 0);
   const masteryStars = Math.max(0, pet.masteryStars ?? getMasteryStarsForXp(masteryXp), getMasteryStarsForXp(masteryXp));
 
   return {

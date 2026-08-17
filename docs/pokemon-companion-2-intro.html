@@ -1,0 +1,730 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pokemon Companion System 2.0</title>
+  <style>
+    :root {
+      --ink: #111827;
+      --soft-ink: #475569;
+      --glass: rgba(255, 255, 255, 0.62);
+      --glass-strong: rgba(255, 255, 255, 0.82);
+      --line: rgba(255, 255, 255, 0.62);
+      --shadow: 0 28px 90px rgba(15, 23, 42, 0.20);
+      --red: #ef4444;
+      --amber: #f59e0b;
+      --green: #22c55e;
+      --cyan: #06b6d4;
+      --blue: #3b82f6;
+      --violet: #8b5cf6;
+      --pink: #ec4899;
+      --radius: 22px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+
+    body {
+      overflow: hidden;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 12% 12%, rgba(34, 211, 238, 0.34), transparent 26%),
+        radial-gradient(circle at 86% 18%, rgba(236, 72, 153, 0.28), transparent 28%),
+        radial-gradient(circle at 50% 88%, rgba(245, 158, 11, 0.30), transparent 30%),
+        linear-gradient(135deg, #e0f2fe 0%, #fff7ed 42%, #f5f3ff 100%);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.32) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.32) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: linear-gradient(to bottom, black, transparent 72%);
+    }
+
+    button { font: inherit; }
+
+    .deck {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .progress {
+      position: fixed;
+      z-index: 40;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 5px;
+      background: rgba(15, 23, 42, 0.10);
+    }
+
+    .progress span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--red), var(--amber), var(--green), var(--cyan), var(--violet), var(--pink));
+      transition: width 260ms ease;
+    }
+
+    .nav {
+      position: fixed;
+      z-index: 45;
+      top: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(1160px, calc(100vw - 28px));
+      min-height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.50);
+      box-shadow: 0 18px 54px rgba(15, 23, 42, 0.16), inset 0 1px 0 rgba(255,255,255,0.75);
+      backdrop-filter: blur(24px) saturate(1.35);
+      transition: opacity 220ms ease, transform 220ms ease;
+    }
+
+    .nav.hidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, -125%);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      font-weight: 950;
+    }
+
+    .orb {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      color: white;
+      background:
+        radial-gradient(circle at 35% 25%, rgba(255,255,255,0.95), transparent 22%),
+        linear-gradient(135deg, #ef4444, #f59e0b 48%, #3b82f6);
+      box-shadow: inset 0 -5px 12px rgba(0,0,0,0.18), 0 10px 22px rgba(239,68,68,0.24);
+      flex: 0 0 auto;
+    }
+
+    .brand span:last-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .nav-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 0 0 auto;
+    }
+
+    .nav button {
+      width: 42px;
+      height: 42px;
+      border: 1px solid rgba(255,255,255,0.70);
+      border-radius: 50%;
+      background: rgba(255,255,255,0.62);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.9);
+      color: var(--ink);
+      font-size: 19px;
+      font-weight: 950;
+      cursor: pointer;
+    }
+
+    .nav button:hover { background: white; }
+    .nav button:disabled { opacity: 0.35; cursor: default; }
+
+    .count {
+      min-width: 64px;
+      text-align: center;
+      color: var(--soft-ink);
+      font-size: 12px;
+      font-weight: 950;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 92px 24px 36px;
+      opacity: 0;
+      transform: translateX(5%) scale(0.985);
+      pointer-events: none;
+      transition: opacity 260ms ease, transform 320ms ease;
+    }
+
+    .slide.active {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+      pointer-events: auto;
+    }
+
+    .stage {
+      width: min(1160px, 100%);
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+      gap: clamp(22px, 5vw, 64px);
+      align-items: center;
+    }
+
+    .stage.single { grid-template-columns: 1fr; }
+
+    .glass {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--glass);
+      box-shadow: var(--shadow), inset 0 1px 0 rgba(255,255,255,0.76);
+      backdrop-filter: blur(26px) saturate(1.35);
+    }
+
+    .panel { padding: clamp(24px, 4vw, 44px); }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.62);
+      color: #7c2d12;
+      border: 1px solid rgba(255,255,255,0.78);
+      font-size: 12px;
+      font-weight: 950;
+      text-transform: uppercase;
+    }
+
+    h1, h2 {
+      margin: 18px 0 0;
+      max-width: 880px;
+      font-size: clamp(38px, 7vw, 86px);
+      line-height: 0.93;
+      letter-spacing: 0;
+    }
+
+    h2 { font-size: clamp(34px, 5.6vw, 68px); }
+
+    .lead {
+      margin: 20px 0 0;
+      max-width: 760px;
+      color: #334155;
+      font-size: clamp(17px, 2.2vw, 24px);
+      line-height: 1.45;
+      font-weight: 780;
+    }
+
+    .hero-art {
+      min-height: 480px;
+      display: grid;
+      place-items: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-art::before {
+      content: "";
+      position: absolute;
+      width: 78%;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: conic-gradient(from 120deg, rgba(239,68,68,0.34), rgba(245,158,11,0.34), rgba(34,197,94,0.30), rgba(59,130,246,0.34), rgba(236,72,153,0.30), rgba(239,68,68,0.34));
+      filter: blur(4px);
+      opacity: 0.88;
+    }
+
+    .hero-art img {
+      position: relative;
+      z-index: 2;
+      width: min(390px, 75vw);
+      max-height: 54vh;
+      object-fit: contain;
+      filter: drop-shadow(0 36px 30px rgba(15,23,42,0.28));
+      animation: float 3.8s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-14px); }
+    }
+
+    .chip-row, .stat-grid, .action-grid, .dex-grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .chip-row {
+      margin-top: 26px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .chip, .stat, .action, .dex {
+      border: 1px solid rgba(255,255,255,0.72);
+      border-radius: 18px;
+      background: rgba(255,255,255,0.66);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), 0 16px 34px rgba(15,23,42,0.10);
+    }
+
+    .chip {
+      min-height: 110px;
+      padding: 16px;
+      font-weight: 950;
+    }
+
+    .chip span {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--soft-ink);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    .stat {
+      padding: 18px;
+      min-height: 168px;
+    }
+
+    .stat .icon {
+      width: 46px;
+      height: 46px;
+      display: grid;
+      place-items: center;
+      border-radius: 16px;
+      margin-bottom: 12px;
+      color: white;
+      font-size: 24px;
+      font-weight: 950;
+      background: linear-gradient(135deg, var(--blue), var(--violet));
+    }
+
+    .stat h3 {
+      margin: 0 0 8px;
+      font-size: 19px;
+    }
+
+    .stat p {
+      margin: 0;
+      color: #475569;
+      font-size: 14px;
+      line-height: 1.45;
+      font-weight: 720;
+    }
+
+    .action-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 24px; }
+
+    .action {
+      padding: 18px;
+      min-height: 142px;
+    }
+
+    .action strong {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 16px;
+    }
+
+    .action p {
+      margin: 0;
+      color: #475569;
+      font-size: 14px;
+      line-height: 1.45;
+      font-weight: 720;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 12px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 54px 1fr;
+      gap: 13px;
+      align-items: center;
+      padding: 14px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.68);
+      border: 1px solid rgba(255,255,255,0.72);
+    }
+
+    .step b {
+      display: grid;
+      place-items: center;
+      width: 54px;
+      height: 54px;
+      border-radius: 16px;
+      color: white;
+      background: linear-gradient(135deg, var(--red), var(--amber));
+    }
+
+    .step strong { display: block; margin-bottom: 4px; }
+    .step p { margin: 0; color: #475569; font-size: 14px; font-weight: 720; line-height: 1.4; }
+
+    .dex-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    .dex {
+      min-height: 132px;
+      padding: 10px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      font-weight: 950;
+    }
+
+    .dex img {
+      width: 82px;
+      height: 82px;
+      object-fit: contain;
+    }
+
+    .unknown {
+      width: 78px;
+      height: 78px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #cbd5e1, #f8fafc);
+      color: #94a3b8;
+      font-size: 38px;
+    }
+
+    .callout {
+      margin-top: 24px;
+      padding: 18px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.72);
+      border: 1px solid rgba(255,255,255,0.78);
+      color: #334155;
+      font-size: 17px;
+      line-height: 1.5;
+      font-weight: 820;
+    }
+
+    .kbd-hint {
+      position: fixed;
+      z-index: 35;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.54);
+      border: 1px solid rgba(255,255,255,0.70);
+      backdrop-filter: blur(18px);
+      color: #475569;
+      font-size: 12px;
+      font-weight: 950;
+      box-shadow: 0 14px 36px rgba(15,23,42,0.12);
+    }
+
+    .kbd {
+      min-width: 30px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: white;
+      border: 1px solid rgba(15,23,42,0.14);
+      border-bottom-width: 3px;
+      color: var(--ink);
+    }
+
+    @media (max-width: 880px) {
+      .stage { grid-template-columns: 1fr; }
+      .hero-art { min-height: 270px; }
+      .hero-art img { width: min(270px, 70vw); }
+      .chip-row, .action-grid { grid-template-columns: 1fr; }
+      .stat-grid, .dex-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .kbd-hint { display: none; }
+    }
+
+    @media (max-width: 560px) {
+      .slide { padding: 84px 12px 24px; }
+      .nav { width: calc(100vw - 16px); top: 8px; }
+      .brand span:last-child { max-width: 44vw; font-size: 13px; }
+      .nav button { width: 38px; height: 38px; }
+      .count { min-width: 48px; }
+      .panel { padding: 20px; }
+      h1, h2 { font-size: clamp(32px, 12vw, 48px); }
+      .lead { font-size: 16px; }
+      .stat-grid, .dex-grid { grid-template-columns: 1fr; }
+      .hero-art { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="deck">
+    <div class="progress"><span id="progressBar"></span></div>
+
+    <nav class="nav" id="nav" aria-label="Dieu huong presentation">
+      <div class="brand"><span class="orb">⚡</span><span>Pokemon Companion System 2.0</span></div>
+      <div class="nav-controls">
+        <button id="prevBtn" aria-label="Trang truoc">←</button>
+        <span class="count" id="count">1/10</span>
+        <button id="nextBtn" aria-label="Trang tiep theo">→</button>
+      </div>
+    </nav>
+
+    <section class="slide active">
+      <div class="stage">
+        <main class="glass panel">
+          <span class="eyebrow">Imperial School Update</span>
+          <h1>Pokemon của bạn lớn lên cùng nỗ lực học tập</h1>
+          <p class="lead">Từ bây giờ, mỗi lần chuẩn bị bài, trả lời, Battle, làm Homework hay đi Cá Ngựa đều có thể giúp hành trình đồng hành của bạn tiến thêm một bước.</p>
+          <div class="chip-row">
+            <div class="chip"><span>Mục tiêu</span>Học đều hơn, dám thử hơn, tiến bộ rõ hơn.</div>
+            <div class="chip"><span>Động lực</span>Pokemon nhận XP, Bond, Charge, Drops và Mastery.</div>
+            <div class="chip"><span>Bộ sưu tập</span>Pokédex ghi lại những Pokemon bạn từng gặp.</div>
+          </div>
+        </main>
+        <aside class="glass hero-art"><img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png" alt="Pikachu"></aside>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="stage single">
+        <main class="glass panel">
+          <span class="eyebrow">Các chỉ số dùng để làm gì?</span>
+          <h2>Hiểu chỉ số là biết cách chăm Pokemon</h2>
+          <div class="stat-grid" style="margin-top: 26px;">
+            <div class="stat"><div class="icon">XP</div><h3>XP</h3><p>Dùng để lên Level. Khi đủ XP, Pokemon level up và có thể tiến hóa theo mốc Level.</p></div>
+            <div class="stat"><div class="icon" style="background:linear-gradient(135deg,#ef4444,#fb7185)">HP</div><h3>HP</h3><p>Là sức khỏe của Pokemon. Battle thua hoặc phần phạt có thể làm mất HP; Homework Done và vật phẩm có thể hồi HP.</p></div>
+            <div class="stat"><div class="icon" style="background:linear-gradient(135deg,#ec4899,#f59e0b)">♡</div><h3>Bond</h3><p>Là độ thân thiết. Bond cao giúp Passive mạnh hơn và cho cảm giác Pokemon thật sự đồng hành với bạn.</p></div>
+            <div class="stat"><div class="icon" style="background:linear-gradient(135deg,#6366f1,#06b6d4)">⚡</div><h3>Charge</h3><p>Là năng lượng tích lũy từ các hành động tốt. Khi đầy, Pokemon sẵn sàng bùng nổ trong các phản ứng đặc biệt.</p></div>
+            <div class="stat"><div class="icon" style="background:linear-gradient(135deg,#22c55e,#14b8a6)">S</div><h3>Streak</h3><p>Là chuỗi cố gắng liên tục: Answer Streak, Battle Win Streak và Homework Streak. Chuỗi cao sẽ mở bonus XP.</p></div>
+            <div class="stat"><div class="icon" style="background:linear-gradient(135deg,#8b5cf6,#ec4899)">★</div><h3>Mastery</h3><p>Sau Lv.30, XP dư chuyển thành Mastery XP. Đây là danh hiệu cho người bền bỉ, không phải lợi thế điểm số lớn.</p></div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="stage">
+        <main class="glass panel">
+          <span class="eyebrow">Làm thế nào để tăng chỉ số?</span>
+          <h2>Mỗi hành động tốt đều có phần thưởng riêng</h2>
+          <div class="action-grid">
+            <div class="action"><strong>Trả lời Solo tốt</strong><p>Tăng XP, Bond, Answer Streak, Charge và có cơ hội nhận Instant Drop.</p></div>
+            <div class="action"><strong>Thắng Battle</strong><p>Tăng Battle Win Streak, nhận XP/Bond/Charge và được lắc Cá Ngựa trước.</p></div>
+            <div class="action"><strong>Làm Homework</strong><p>Được +8 Hào Quang, Pokemon +8 HP, tăng Homework Streak, XP và Bond.</p></div>
+            <div class="action"><strong>Cán đích Cá Ngựa</strong><p>Nhận thưởng cán đích và mở Vòng quay may mắn với tỉ lệ 60% quà tốt.</p></div>
+            <div class="action"><strong>Ấp trứng</strong><p>Tích lũy tiến trình để nở Pokemon mới, có cơ hội Shiny hiếm.</p></div>
+            <div class="action"><strong>Giữ phong độ</strong><p>Chuỗi dài giúp Pokemon phát triển nhanh và mở nhiều phản ứng vui hơn.</p></div>
+          </div>
+        </main>
+        <aside class="glass hero-art"><img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/133.png" alt="Eevee"></aside>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="stage">
+        <main class="glass panel">
+          <span class="eyebrow">Level & Evolution</span>
+          <h2>Tiến hóa theo XP, không còn theo Hào Quang</h2>
+          <p class="lead">Hào Quang vẫn quan trọng cho điểm lớp, nhưng Pokemon tiến hóa bằng XP và Level của chính Pokemon.</p>
+          <div class="callout">Nếu Pokemon từng tiến hóa theo hệ cũ, hình thái sẽ được tính lại theo XP/Level hiện tại để công bằng hơn cho tất cả.</div>
+        </main>
+        <aside class="timeline">
+          <div class="step glass"><b>1</b><div><strong>Lv. 1</strong><p>Bắt đầu hành trình.</p></div></div>
+          <div class="step glass"><b>5</b><div><strong>Lv. 5</strong><p>Mốc tiến hóa đầu tiên với nhiều dòng Pokemon.</p></div></div>
+          <div class="step glass"><b>12</b><div><strong>Lv. 12</strong><p>Pokemon có thể đổi sang hình thái mạnh hơn.</p></div></div>
+          <div class="step glass"><b>20</b><div><strong>Lv. 20</strong><p>Một số nhánh tiến hóa mới mở ra.</p></div></div>
+          <div class="step glass"><b>30</b><div><strong>Lv. 30</strong><p>Chạm giới hạn Level và bắt đầu Mastery.</p></div></div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="stage">
+        <main class="glass panel">
+          <span class="eyebrow">Homework Streak</span>
+          <h2>Bài tập về nhà bây giờ có sức mạnh thật</h2>
+          <p class="lead">Mỗi lần Homework Done, bạn nhận +8 Hào Quang và Pokemon hồi +8 HP. Làm đều nhiều buổi còn giúp tăng streak và bonus XP.</p>
+          <div class="chip-row">
+            <div class="chip"><span>Done</span>+8 Hào Quang</div>
+            <div class="chip"><span>Pokemon</span>+8 HP, XP, Bond</div>
+            <div class="chip"><span>Streak</span>x3, x5 mở bonus XP</div>
+          </div>
+        </main>
+        <aside class="glass hero-art"><img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/175.png" alt="Togepi"></aside>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="stage">
+        <main class="glass panel">
+          <span class="eyebrow">Battle & Cá Ngựa</span>
+          <h2>Thắng Battle được quyền lắc trước</h2>
+          <p class="lead">Sau Battle, người thắng sẽ lắc Cá Ngựa trước. Người thua lắc sau nếu điểm Battle không bị âm. Màn hình Cá Ngựa sẽ hiện sẵn lượt tiếp theo để không cần chọn lại từ dropdown.</p>
+          <div class="action-grid">
+            <div class="action"><strong>Winner</strong><p>Lắc trước, nhận Battle Win Streak và Pokemon progression.</p></div>
+            <div class="action"><strong>Loser</strong><p>Lắc sau nếu điểm không âm. Nếu bị âm điểm thì mất lượt Cá Ngựa.</p></div>
+            <div class="action"><strong>Finish Tile</strong><p>Cán đích mở Lucky Wheel: 60% quà tốt, 40% quà thử thách.</p></div>
+          </div>
+        </main>
+        <aside class="glass hero-art"><img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/448.png" alt="Lucario"></aside>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="stage">
+        <main class="glass panel">
+          <span class="eyebrow">Instant Drops & Shiny</span>
+          <h2>Những khoảnh khắc bất ngờ làm lớp học vui hơn</h2>
+          <p class="lead">Sau các lượt tích cực, Pokemon có thể nhận vật phẩm tự động như Rare Candy, Oran Berry, Friendship Ribbon hoặc Energy Spark. Trứng và quà Pokemon cũng có cơ hội nở ra Shiny.</p>
+          <div class="chip-row">
+            <div class="chip"><span>Rare Candy</span>+15 XP</div>
+            <div class="chip"><span>Oran Berry</span>+10 HP</div>
+            <div class="chip"><span>Energy Spark</span>+1 Charge</div>
+          </div>
+        </main>
+        <aside class="glass hero-art"><img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/shiny/94.png" alt="Shiny Gengar"></aside>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="stage">
+        <main class="glass panel">
+          <span class="eyebrow">Pokédex</span>
+          <h2>Bộ sưu tập ghi lại hành trình của bạn</h2>
+          <p class="lead">Pokemon từng nở, được tặng, hợp thể hoặc rời đội hình vẫn được lưu trong Pokédex. Ô chưa mở là mục tiêu mới cho cả lớp.</p>
+          <div class="callout">Shiny từng gặp sẽ có dấu riêng. Một lần may mắn cũng trở thành kỷ niệm lâu dài.</div>
+        </main>
+        <aside class="dex-grid">
+          <div class="dex glass"><img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/1.png" alt="Bulbasaur">#001</div>
+          <div class="dex glass"><img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/4.png" alt="Charmander">#004</div>
+          <div class="dex glass"><img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/shiny/25.png" alt="Shiny Pikachu">✨ #025</div>
+          <div class="dex glass"><div class="unknown">?</div>#???</div>
+          <div class="dex glass"><img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/54.png" alt="Psyduck">#054</div>
+          <div class="dex glass"><div class="unknown">?</div>#???</div>
+          <div class="dex glass"><img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/151.png" alt="Mew">#151</div>
+          <div class="dex glass"><div class="unknown">?</div>#???</div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="stage">
+        <main class="glass panel">
+          <span class="eyebrow">Mastery</span>
+          <h2>Lv.30 không phải điểm kết thúc</h2>
+          <p class="lead">Sau Lv.30, XP dư chuyển thành Mastery XP. Mastery là huy hiệu danh dự cho những ai chăm chỉ lâu dài.</p>
+          <div class="chip-row">
+            <div class="chip"><span>★ 1</span>300 Mastery XP</div>
+            <div class="chip"><span>★ 3</span>1200 Mastery XP</div>
+            <div class="chip"><span>★ 5</span>2600 Mastery XP</div>
+          </div>
+        </main>
+        <aside class="glass hero-art"><img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/384.png" alt="Rayquaza"></aside>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="stage">
+        <main class="glass panel">
+          <span class="eyebrow">Thông điệp cuối</span>
+          <h2>Đừng chỉ săn điểm. Hãy xây hành trình.</h2>
+          <p class="lead">Một câu trả lời hôm nay, một bài tập hoàn thành, một lần thử lại sau khi sai: tất cả đều là XP cho chính bạn và Pokemon của bạn.</p>
+          <div class="action-grid">
+            <div class="action"><strong>Dám trả lời</strong><p>Không cần hoàn hảo. Cần can đảm thử.</p></div>
+            <div class="action"><strong>Giữ đều đặn</strong><p>Streak nhỏ mỗi ngày tạo thay đổi lớn.</p></div>
+            <div class="action"><strong>Cùng tiến bộ</strong><p>Pokemon lớn lên khi bạn không bỏ cuộc.</p></div>
+          </div>
+        </main>
+        <aside class="glass hero-art"><img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/151.png" alt="Mew"></aside>
+      </div>
+    </section>
+  </div>
+
+  <div class="kbd-hint"><span class="kbd">←</span> Trang trước <span class="kbd">→</span> Trang tiếp theo</div>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const nav = document.getElementById("nav");
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+    const count = document.getElementById("count");
+    const progressBar = document.getElementById("progressBar");
+    let index = 0;
+    let navTimer = 0;
+
+    function showNav() {
+      nav.classList.remove("hidden");
+      clearTimeout(navTimer);
+      navTimer = setTimeout(() => {
+        if (!nav.matches(":hover") && document.activeElement?.closest(".nav") !== nav) {
+          nav.classList.add("hidden");
+        }
+      }, 2600);
+    }
+
+    function render() {
+      slides.forEach((slide, slideIndex) => slide.classList.toggle("active", slideIndex === index));
+      count.textContent = `${index + 1}/${slides.length}`;
+      progressBar.style.width = `${((index + 1) / slides.length) * 100}%`;
+      prevBtn.disabled = index === 0;
+      nextBtn.disabled = index === slides.length - 1;
+      showNav();
+    }
+
+    function go(delta) {
+      index = Math.max(0, Math.min(slides.length - 1, index + delta));
+      render();
+    }
+
+    prevBtn.addEventListener("click", () => go(-1));
+    nextBtn.addEventListener("click", () => go(1));
+
+    window.addEventListener("keydown", event => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        go(-1);
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        go(1);
+      }
+      if (event.key === "Home") {
+        event.preventDefault();
+        index = 0;
+        render();
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        index = slides.length - 1;
+        render();
+      }
+    });
+
+    window.addEventListener("mousemove", event => {
+      if (event.clientY < 100) showNav();
+    });
+    nav.addEventListener("mouseenter", showNav);
+    nav.addEventListener("focusin", showNav);
+    render();
+  </script>
+</body>
+</html>
