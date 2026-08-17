@@ -1,4 +1,4 @@
-import { PokemonPet, Student, StudentPokemonProgress } from './types';
+import { HistoryItem, PokemonPet, PokemonReleaseEvent, Student, StudentPokemonProgress } from './types';
 import {
   addPokemonXp,
   clamp,
@@ -47,7 +47,84 @@ export interface PokemonUiEvent {
 export interface GameEventResult {
   student: Student;
   uiEvents: PokemonUiEvent[];
+  releaseEvent?: PokemonReleaseEvent | null;
 }
+
+export interface PokemonHpDeltaResult {
+  student: Student;
+  releaseEvent: PokemonReleaseEvent | null;
+}
+
+export const releasePokemonFromStudent = (
+  student: Student,
+  releasedPet: PokemonPet,
+  reason: string,
+  cause?: string,
+  timestamp = Date.now()
+): { student: Student; event: PokemonReleaseEvent } => {
+  const currentPets = student.pets && student.pets.length > 0 ? student.pets : (student.pet ? [student.pet] : []);
+  const remainingPets = currentPets.filter(pet => pet.instanceId && releasedPet.instanceId
+    ? pet.instanceId !== releasedPet.instanceId
+    : !(pet.dexId === releasedPet.dexId && pet.name === releasedPet.name && (pet.baseDexId || pet.dexId) === (releasedPet.baseDexId || releasedPet.dexId))
+  );
+  const historyItem: HistoryItem = {
+    id: `${timestamp}${Math.random()}`,
+    amount: 0,
+    reason,
+    timestamp
+  };
+  const nextStudent: Student = {
+    ...student,
+    pet: undefined,
+    pets: remainingPets,
+    history: [historyItem, ...student.history].slice(0, 50)
+  };
+
+  return {
+    student: nextStudent,
+    event: {
+      studentId: student.id,
+      studentName: student.name,
+      releasedPet,
+      remainingPets,
+      cause
+    }
+  };
+};
+
+export const applyPetHpDeltaToStudent = (
+  student: Student,
+  hpDelta: number,
+  historyReason: string,
+  timestamp = Date.now()
+): PokemonHpDeltaResult => {
+  if (!student.pet || hpDelta === 0) return { student, releaseEvent: null };
+
+  const updatedPet: PokemonPet = {
+    ...normalizePokemonPet(student.pet),
+    hp: clamp((student.pet.hp ?? 100) + hpDelta, 0, 100)
+  };
+
+  if ((updatedPet.hp ?? 0) <= 0) {
+    const release = releasePokemonFromStudent(
+      { ...student, pet: updatedPet, pets: updatePetInCollection(student, updatedPet) },
+      updatedPet,
+      `🌲 ${getPokemonDisplayName(updatedPet)} đã được thả về rừng vì hết HP. ${historyReason}`,
+      historyReason,
+      timestamp
+    );
+    return { student: release.student, releaseEvent: release.event };
+  }
+
+  return {
+    student: {
+      ...student,
+      pet: updatedPet,
+      pets: updatePetInCollection(student, updatedPet)
+    },
+    releaseEvent: null
+  };
+};
 
 const getAnswerStreakBonusXp = (streak: number): number => {
   if (streak === 3) return 5;

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Student, Gender, HistoryItem, RankInfo, Skill, PokemonPet, LudoTileSpec, LuckyWheelReward, LuckyWheelRewardType } from './types';
+import { Student, Gender, HistoryItem, RankInfo, Skill, PokemonPet, PokemonReleaseEvent, LudoTileSpec, LuckyWheelReward, LuckyWheelRewardType } from './types';
 import { 
   STORAGE_KEY, DEFAULT_RANKS_MALE, DEFAULT_RANKS_FEMALE, 
   RANKS_KEY_MALE, RANKS_KEY_FEMALE, DEFAULT_SKILLS, SKILLS_KEY,
@@ -15,14 +15,12 @@ import { HomeworkCheckModal } from './components/HomeworkCheckModal';
 import { HomeworkStatus } from './components/HomeworkCheckModal';
 import { PokemonMiniStatus } from './components/PokemonMiniStatus';
 import { PokemonPassiveBadge } from './components/PokemonPassiveBadge';
-import { GlobalPokedexModal } from './components/GlobalPokedexModal';
-import { PokemonPokedexPanel } from './components/PokemonPokedexPanel';
 import { PokemonReactionToast } from './components/PokemonReactionToast';
 import { generateEdict } from './geminiService';
 import { LIST_POKEMONS, LIST_PET_SKILLS as DEFAULT_PET_SKILLS, PetSkill, getRandomPokemon } from './pokemonData';
 import { useAuth } from './AuthContext';
 import { fetchUserSettings, upsertUserSettings } from './supabaseData';
-import { applyGameEventToStudent, GameEventSource, PokemonUiEvent } from './gameEvents';
+import { applyGameEventToStudent, applyPetHpDeltaToStudent, GameEventSource, PokemonUiEvent } from './gameEvents';
 import {
   createPokemonPetFromDexId,
   getPokemonArtworkUrl,
@@ -30,7 +28,6 @@ import {
   getNextMasteryTarget,
   getNextEvolutionPreview,
   isSamePokemonPet,
-  markPokemonDiscovered,
   normalizePokemonPet,
   normalizeStudentPokemonData,
   totalXpForLevel,
@@ -48,14 +45,6 @@ interface LuckyWheelResult {
   skill?: PetSkill;
   hpDelta?: number;
   message: string;
-}
-
-interface PokemonReleaseEvent {
-  studentId: string;
-  studentName: string;
-  releasedPet: PokemonPet;
-  remainingPets: PokemonPet[];
-  cause?: string;
 }
 
 interface LevelUpAnnouncement {
@@ -401,7 +390,6 @@ const App: React.FC = () => {
   const [selectedFusionPetDexIds, setSelectedFusionPetDexIds] = useState<number[]>([]);
 
   const [showGroupModal, setShowGroupModal] = useState(false);
-  const [showGlobalPokedexModal, setShowGlobalPokedexModal] = useState(false);
   const [groupSize, setGroupSize] = useState(2);
   const [generatedGroups, setGeneratedGroups] = useState<Student[][]>([]);
   const [showTimerModal, setShowTimerModal] = useState(false);
@@ -974,58 +962,6 @@ const App: React.FC = () => {
     return isSamePokemonPet(a, b);
   };
 
-  const releasePetFromStudent = (student: Student, releasedPet: PokemonPet, reason: string, cause?: string) => {
-    const currentPets = student.pets && student.pets.length > 0 ? student.pets : (student.pet ? [student.pet] : []);
-    const remainingPets = currentPets.filter(p => !isSamePokemon(p, releasedPet));
-    const historyItem: HistoryItem = {
-      id: Date.now().toString() + Math.random(),
-      amount: 0,
-      reason,
-      timestamp: Date.now()
-    };
-    const discoveredStudent = markPokemonDiscovered(student, releasedPet);
-    const nextStudent: Student = {
-      ...discoveredStudent,
-      pet: undefined,
-      pets: remainingPets,
-      history: [historyItem, ...discoveredStudent.history].slice(0, 50)
-    };
-    return {
-      student: nextStudent,
-      event: {
-        studentId: student.id,
-        studentName: student.name,
-        releasedPet,
-        remainingPets,
-        cause
-      } as PokemonReleaseEvent
-    };
-  };
-
-  const applyPetHpDelta = (student: Student, hpDelta: number, historyReason: string) => {
-    if (!student.pet) return { student, releaseEvent: null as PokemonReleaseEvent | null };
-    const nextHp = Math.min(100, Math.max(0, (student.pet.hp ?? 100) + hpDelta));
-    const updatedPet: PokemonPet = { ...student.pet, hp: nextHp };
-    if (nextHp <= 0) {
-      const release = releasePetFromStudent(
-        { ...student, pet: updatedPet, pets: updateActivePetInCollection(student, updatedPet) },
-        updatedPet,
-        `🌲 ${getPokemonDisplayName(updatedPet)} đã được thả về rừng vì hết HP. ${historyReason}`,
-        historyReason
-      );
-      return { student: release.student, releaseEvent: release.event };
-    }
-
-    return {
-      student: {
-        ...student,
-        pet: updatedPet,
-        pets: updateActivePetInCollection(student, updatedPet)
-      },
-      releaseEvent: null as PokemonReleaseEvent | null
-    };
-  };
-
   const handleSelectReplacementPokemon = (pet: PokemonPet) => {
     if (!pokemonReleaseEvent) return;
     setStudents(prev => prev.map(s => {
@@ -1089,8 +1025,10 @@ const App: React.FC = () => {
             };
             hatchedNames.push(s.name);
           }
-        } else if (currentStudent.pet) {
-          const hpUpdate = applyPetHpDelta(currentStudent, amount, `${reason}: ${amount >= 0 ? 'hồi' : 'mất'} ${Math.abs(amount)} HP`);
+        }
+
+        if (currentStudent.pet && amount !== 0) {
+          const hpUpdate = applyPetHpDeltaToStudent(currentStudent, amount, `${reason}: ${amount >= 0 ? 'hồi' : 'mất'} ${Math.abs(amount)} HP`);
           currentStudent = hpUpdate.student;
           if (hpUpdate.releaseEvent && !releaseEventToShow) {
             releaseEventToShow = hpUpdate.releaseEvent;
@@ -1115,23 +1053,11 @@ const App: React.FC = () => {
             .forEach(event => evolvedMessages.push(`Linh thú của ${s.name}: ${event.message}!`));
         }
 
-        const pokedex = { ...(currentStudent.pokedex || {}) };
-        (currentStudent.pets || []).forEach(pet => {
-          pokedex[pet.dexId] = {
-            ...(pokedex[pet.dexId] || {}),
-            dexId: pet.dexId,
-            discovered: true,
-            shinyDiscovered: pokedex[pet.dexId]?.shinyDiscovered || pet.isShiny,
-            firstDiscoveredAt: pokedex[pet.dexId]?.firstDiscoveredAt || Date.now()
-          };
-        });
-
         return {
           ...currentStudent,
           points: newPoints,
           history: [history, ...currentStudent.history].slice(0, 50),
-          egg: currentEgg,
-          pokedex
+          egg: currentEgg
         };
       }
       return s;
@@ -1318,11 +1244,11 @@ const App: React.FC = () => {
     // Load selected pet as active
     const nextPet = normalizePokemonPet(chosenPet);
 
-    const updatedS: Student = markPokemonDiscovered({
+    const updatedS: Student = {
       ...s,
       pet: nextPet,
       pets: updatePetInCollection({ ...s, pets: ownedPets }, nextPet)
-    }, nextPet);
+    };
 
     setStudents(prev => prev.map(x => x.id === studentId ? updatedS : x));
     setEditingStudent(updatedS);
@@ -1699,14 +1625,7 @@ const App: React.FC = () => {
 
       if (status === 'not-yet') {
         notYetCount += 1;
-        return {
-          ...baseStudent,
-          pokemonProgress: {
-            ...baseStudent.pokemonProgress!,
-            lastHomeworkLessonKey: lessonKey
-          },
-          history: [historyItem, ...baseStudent.history].slice(0, 50)
-        };
+        return baseStudent;
       }
 
       if (status === 'missing') {
@@ -1723,7 +1642,7 @@ const App: React.FC = () => {
           points: result.student.points - 10
         };
         if (resultStudent.pet) {
-          const hpUpdate = applyPetHpDelta(resultStudent, -10, 'Homework Missing: mất 10 HP');
+          const hpUpdate = applyPetHpDeltaToStudent(resultStudent, -10, 'Homework Missing: mất 10 HP');
           resultStudent = hpUpdate.student;
           if (hpUpdate.releaseEvent && !releaseEventToShow) releaseEventToShow = hpUpdate.releaseEvent;
           uiEvents.push({ type: 'hp', message: `${student.name}: Pokémon -10 HP` });
@@ -1751,7 +1670,7 @@ const App: React.FC = () => {
         points: rewardedStudent.points
       };
       if (resultStudent.pet) {
-        const hpUpdate = applyPetHpDelta(resultStudent, 8, 'Homework Done: hồi 8 HP');
+        const hpUpdate = applyPetHpDeltaToStudent(resultStudent, 8, 'Homework Done: hồi 8 HP');
         resultStudent = hpUpdate.student;
         uiEvents.push({ type: 'hp', message: `${student.name}: Pokémon +8 HP` });
       }
@@ -1931,9 +1850,8 @@ const App: React.FC = () => {
             pets: [result.pokemon, ...currentPets],
             history: [historyItem, ...s.history].slice(0, 50)
           };
-          const discoveredS = markPokemonDiscovered(updatedS, result.pokemon);
-          updatedTarget = discoveredS;
-          return discoveredS;
+          updatedTarget = updatedS;
+          return updatedS;
         }
 
         if (reward.type === 'skill' && result.skill && s.pet) {
@@ -1955,7 +1873,7 @@ const App: React.FC = () => {
         }
 
         if (reward.type === 'hp' && s.pet) {
-          const hpUpdate = applyPetHpDelta(s, result.hpDelta || 0, `Vòng quay may mắn: ${reward.label}`);
+          const hpUpdate = applyPetHpDeltaToStudent(s, result.hpDelta || 0, `Vòng quay may mắn: ${reward.label}`);
           const updatedS: Student = {
             ...hpUpdate.student,
             history: [historyItem, ...hpUpdate.student.history].slice(0, 50)
@@ -2114,7 +2032,7 @@ const App: React.FC = () => {
       let baseStudent = normalizeStudentPokemonData(student);
 
       if (hpDelta !== null) {
-        const hpUpdate = applyPetHpDelta(baseStudent, hpDelta, hpReason || historyReason);
+        const hpUpdate = applyPetHpDeltaToStudent(baseStudent, hpDelta, hpReason || historyReason);
         baseStudent = hpUpdate.student;
         if (hpUpdate.releaseEvent && !releaseEventToShow) releaseEventToShow = hpUpdate.releaseEvent;
       }
@@ -2334,11 +2252,11 @@ const App: React.FC = () => {
 
     const updatedPets = [fusedPet, ...remainingPets];
 
-    const updatedS: Student = markPokemonDiscovered({
+    const updatedS: Student = {
       ...s,
       pet: fusedPet,
       pets: updatedPets
-    }, fusedPet);
+    };
 
     setStudents(prev => prev.map(x => x.id === studentId ? updatedS : x));
     setEditingStudent(updatedS);
@@ -2423,6 +2341,28 @@ const App: React.FC = () => {
   const handleLudoRollDice = (student: Student, options?: { isBonusRoll?: boolean }) => {
     if (ludoRolling) return;
     const isBonusRoll = !!options?.isBonusRoll;
+    let releaseEventToShow: PokemonReleaseEvent | null = null;
+    const applyLudoAuraReward = (target: Student, amount: number, reason: string): Student => {
+      const historyItem: HistoryItem = {
+        id: Date.now().toString() + Math.random(),
+        amount,
+        reason,
+        timestamp: Date.now()
+      };
+      const pointUpdatedStudent: Student = {
+        ...target,
+        points: target.points + amount,
+        history: [historyItem, ...target.history].slice(0, 50)
+      };
+      const hpUpdate = applyPetHpDeltaToStudent(
+        pointUpdatedStudent,
+        amount,
+        `${reason}: ${amount >= 0 ? 'hồi' : 'mất'} ${Math.abs(amount)} HP`
+      );
+      if (hpUpdate.releaseEvent && !releaseEventToShow) releaseEventToShow = hpUpdate.releaseEvent;
+      return hpUpdate.student;
+    };
+
     setLudoRolling(true);
     setLudoDice(null);
     playDiceSound();
@@ -2443,11 +2383,7 @@ const App: React.FC = () => {
           history: [{ id: Date.now().toString() + Math.random(), amount: 0, reason: '🎁 Lượt lắc Cá Ngựa bonus từ Vòng quay may mắn', timestamp: Date.now() }, ...s.history]
         };
       }
-      return {
-        ...s,
-        points: s.points + 1,
-        history: [{ id: Date.now().toString() + Math.random(), amount: 1, reason: '🎲 Trả lời đúng câu hỏi Cá Ngựa (+1đ)', timestamp: Date.now() }, ...s.history]
-      };
+      return applyLudoAuraReward(s, 1, '🎲 Trả lời đúng câu hỏi Cá Ngựa (+1đ)');
     });
 
     setTimeout(() => {
@@ -2477,6 +2413,7 @@ const App: React.FC = () => {
             type: 'monster'
           });
           setStudents(updatedStudents);
+          if (releaseEventToShow) setPokemonReleaseEvent(releaseEventToShow);
           advanceBattleQueue(updatedStudents);
           return;
         } else {
@@ -2501,11 +2438,7 @@ const App: React.FC = () => {
         reachedFinishReward = true;
         updatedStudents = updatedStudents.map(s => {
           if (s.id === student.id) {
-            return {
-              ...s,
-              points: s.points + 20,
-              history: [{ id: Date.now().toString() + Math.random(), amount: 20, reason: '🎉 Hoàn thành 1 vòng bàn cờ Cá Ngựa (+20đ)', timestamp: Date.now() }, ...s.history]
-            };
+            return applyLudoAuraReward(s, 20, '🎉 Hoàn thành 1 vòng bàn cờ Cá Ngựa (+20đ)');
           }
           return s;
         });
@@ -2614,11 +2547,7 @@ const App: React.FC = () => {
           const val = tileSpec.value || 5;
           updatedStudents = updatedStudents.map(s => {
             if (s.id === student.id) {
-              return {
-                ...s,
-                points: s.points + val,
-                history: [{ id: Date.now().toString() + Math.random(), amount: val, reason: `💎 Nhặt được ${tileSpec.title} (+${val}đ)`, timestamp: Date.now() }, ...s.history]
-              };
+              return applyLudoAuraReward(s, val, `💎 Nhặt được ${tileSpec.title} (${val >= 0 ? '+' : ''}${val}đ)`);
             }
             return s;
           });
@@ -2656,6 +2585,7 @@ const App: React.FC = () => {
       });
 
       setStudents(updatedStudents);
+      if (releaseEventToShow) setPokemonReleaseEvent(releaseEventToShow);
       setLudoLogs(prev => [...logs, ...prev].slice(0, 40));
       advanceBattleQueue(updatedStudents);
 
@@ -3151,7 +3081,6 @@ const App: React.FC = () => {
               onRandom={handleRandom}
               onLudo={() => openLudoForClass()}
               onLuckyWheel={handleOpenLuckyWheel}
-              onPokedex={() => setShowGlobalPokedexModal(true)}
               onGroup={() => setShowGroupModal(true)}
               onTimer={() => setShowTimerModal(true)}
               onSelectAll={handleToggleSelectAll}
@@ -3349,8 +3278,6 @@ const App: React.FC = () => {
                                 pets: updatedPet ? updatePetInCollection(editingStudent, updatedPet) : editingStudent.pets,
                                 history: [historyItem, ...editingStudent.history].slice(0, 50)
                               };
-                              if (updatedPet && isHatching) currentMerged = markPokemonDiscovered(currentMerged, updatedPet);
-
                               setEditingStudent(currentMerged);
                               setStudents(prev => prev.map(s => s.id === editingStudent.id ? currentMerged : s));
                             }}
@@ -3373,12 +3300,12 @@ const App: React.FC = () => {
                                  const updatedEgg = { ...currentEgg, status: 'hatched' as const, progress: 10 };
                                  const updatedPet = createPokemonPetFromDexId(currentEgg.assignedDexId);
                                  
-                                 const currentMerged: Student = markPokemonDiscovered({
+                                 const currentMerged: Student = {
                                    ...editingStudent,
                                    egg: updatedEgg,
                                    pet: updatedPet,
                                    pets: updatePetInCollection(editingStudent, updatedPet)
-                                 }, updatedPet);
+                                 };
 
                                  setEditingStudent(currentMerged);
                                  setStudents(prev => prev.map(s => s.id === editingStudent.id ? currentMerged : s));
@@ -3432,7 +3359,6 @@ const App: React.FC = () => {
                         </div>
                       </div>
                     )}
-                    <PokemonPokedexPanel student={editingStudent} />
                   </div>
                 ) : (
                   /* PET CORNER DETAILED STORE & CUSTOMIZATION */
@@ -3605,8 +3531,6 @@ const App: React.FC = () => {
 
                       </div>
                     )}
-                    <PokemonPokedexPanel student={editingStudent} />
-
                     {/* SECTION: YOUR NEW DIRECT PET ACTIVE SKILLS (LIMIT 2 USES) */}
                     {editingStudent.pet.skills && editingStudent.pet.skills.length > 0 && (
                       <div className="space-y-4 pt-4">
@@ -5084,14 +5008,6 @@ const App: React.FC = () => {
             <div className="text-[9px] uppercase font-bold text-amber-900/40 tracking-wider">Cung điện Hoàng Gia - Bảo học Linh thú đồng hành</div>
           </div>
         </div>
-      )}
-
-      {showGlobalPokedexModal && (
-        <GlobalPokedexModal
-          students={students}
-          getRank={getRank}
-          onClose={() => setShowGlobalPokedexModal(false)}
-        />
       )}
 
       {showAttendanceModal && (

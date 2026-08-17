@@ -224,19 +224,6 @@ export const normalizePokemonPet = (pet: PokemonPet): PokemonPet => {
   };
 };
 
-export const markPokemonDiscovered = (student: Student, pet: PokemonPet): Student => {
-  const normalizedPet = normalizePokemonPet(pet);
-  const pokedex = { ...(student.pokedex || {}) };
-  pokedex[normalizedPet.dexId] = {
-    ...(pokedex[normalizedPet.dexId] || {}),
-    dexId: normalizedPet.dexId,
-    discovered: true,
-    shinyDiscovered: pokedex[normalizedPet.dexId]?.shinyDiscovered || normalizedPet.isShiny,
-    firstDiscoveredAt: pokedex[normalizedPet.dexId]?.firstDiscoveredAt || Date.now()
-  };
-  return { ...student, pokedex };
-};
-
 export const createPokemonPetFromDexId = (
   dexId: number,
   nickname?: string,
@@ -289,7 +276,6 @@ export const normalizeStudentPokemonData = (student: Student): Student => {
     ...student,
     pet: activePet,
     pets: uniquePets,
-    pokedex: uniquePets.reduce((nextStudent, pet) => markPokemonDiscovered(nextStudent, pet), { ...student, pokedex: student.pokedex || {} }).pokedex,
     pokemonProgress: progress
   };
 };

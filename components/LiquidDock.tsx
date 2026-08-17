@@ -15,7 +15,6 @@ interface LiquidDockProps {
   onRandom: () => void;
   onLudo: () => void;
   onLuckyWheel: () => void;
-  onPokedex: () => void;
   onGroup: () => void;
   onTimer: () => void;
   onSelectAll: () => void;
@@ -34,7 +33,6 @@ export const LiquidDock: React.FC<LiquidDockProps> = ({
   onRandom,
   onLudo,
   onLuckyWheel,
-  onPokedex,
   onGroup,
   onTimer,
   onSelectAll,
@@ -72,13 +70,6 @@ export const LiquidDock: React.FC<LiquidDockProps> = ({
       icon: '🎡',
       onClick: onLuckyWheel,
       color: 'from-rose-400 via-fuchsia-500 to-purple-700',
-    },
-    {
-      id: 'pokedex',
-      label: 'Pokedex',
-      icon: '📕',
-      onClick: onPokedex,
-      color: 'from-cyan-300 via-sky-500 to-indigo-700',
     },
     {
       id: 'group',

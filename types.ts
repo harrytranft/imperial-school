@@ -40,6 +40,14 @@ export interface PokemonPet {
   passiveId?: string;
 }
 
+export interface PokemonReleaseEvent {
+  studentId: string;
+  studentName: string;
+  releasedPet: PokemonPet;
+  remainingPets: PokemonPet[];
+  cause?: string;
+}
+
 export interface StudentPokemonProgress {
   answerStreak: number;
   bestAnswerStreak: number;
@@ -50,13 +58,6 @@ export interface StudentPokemonProgress {
   lastHomeworkLessonKey?: string;
   positiveSoloCount?: number;
   battleWins?: number;
-}
-
-export interface PokemonPokedexEntry {
-  dexId: number;
-  discovered: boolean;
-  shinyDiscovered?: boolean;
-  firstDiscoveredAt?: number;
 }
 
 export interface Student {
@@ -72,7 +73,6 @@ export interface Student {
   pet?: PokemonPet;
   pets?: PokemonPet[]; // List of all acquired pets
   pokemonProgress?: StudentPokemonProgress;
-  pokedex?: Record<number, PokemonPokedexEntry>;
   ludoTile?: number; // Position on board (0 to 49)
   ludoSteps?: number; // Total step count
   ludoMonsterStuck?: boolean; // Trapped by monster flag
