@@ -10,9 +10,12 @@ import {
 } from './constants';
 import { StudentCard } from './components/StudentCard';
 import { LiquidDock } from './components/LiquidDock';
+import { AttendanceCheckModal } from './components/AttendanceCheckModal';
 import { HomeworkCheckModal } from './components/HomeworkCheckModal';
+import { HomeworkStatus } from './components/HomeworkCheckModal';
 import { PokemonMiniStatus } from './components/PokemonMiniStatus';
 import { PokemonPassiveBadge } from './components/PokemonPassiveBadge';
+import { GlobalPokedexModal } from './components/GlobalPokedexModal';
 import { PokemonPokedexPanel } from './components/PokemonPokedexPanel';
 import { PokemonReactionToast } from './components/PokemonReactionToast';
 import { generateEdict } from './geminiService';
@@ -71,6 +74,8 @@ const getLocalDateKey = (date = new Date()) => {
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
+
+const DEFAULT_WHEEL_SPIN_SOUND_URL = 'https://actions.google.com/sounds/v1/transportation/airport_departure_chime.ogg';
 
 const AuthLoginForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
   const { loginWithEmail, signUpWithEmail } = useAuth();
@@ -302,8 +307,9 @@ const App: React.FC = () => {
   // Modals
   const [showRandomModal, setShowRandomModal] = useState(false);
   const [randomStudent, setRandomStudent] = useState<Student | null>(null);
+  const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [showHomeworkModal, setShowHomeworkModal] = useState(false);
-  const [homeworkStatuses, setHomeworkStatuses] = useState<Record<string, 'done' | 'missing'>>({});
+  const [homeworkStatuses, setHomeworkStatuses] = useState<Record<string, HomeworkStatus>>({});
   const [randomMode, setRandomMode] = useState<'solo' | 'battle'>('solo');
   const [battleStudentA, setBattleStudentA] = useState<Student | null>(null);
   const [battleStudentB, setBattleStudentB] = useState<Student | null>(null);
@@ -395,6 +401,7 @@ const App: React.FC = () => {
   const [selectedFusionPetDexIds, setSelectedFusionPetDexIds] = useState<number[]>([]);
 
   const [showGroupModal, setShowGroupModal] = useState(false);
+  const [showGlobalPokedexModal, setShowGlobalPokedexModal] = useState(false);
   const [groupSize, setGroupSize] = useState(2);
   const [generatedGroups, setGeneratedGroups] = useState<Student[][]>([]);
   const [showTimerModal, setShowTimerModal] = useState(false);
@@ -478,10 +485,6 @@ const App: React.FC = () => {
         events: levelEvents.slice(0, 3)
       });
     }
-    pokemonReactionTimerRef.current = window.setTimeout(() => {
-      setPokemonReactionEvents([]);
-      pokemonReactionTimerRef.current = null;
-    }, 10000);
   };
 
   // Sync state FROM Supabase on login (high priority)
@@ -1633,7 +1636,7 @@ const App: React.FC = () => {
       alert("Không có học sinh đang hiện diện để check BTVN.");
       return;
     }
-    const defaultStatuses: Record<string, 'done' | 'missing'> = {};
+    const defaultStatuses: Record<string, HomeworkStatus> = {};
     presentStudents.forEach(student => {
       defaultStatuses[student.id] = 'done';
     });
@@ -1641,10 +1644,25 @@ const App: React.FC = () => {
     setShowHomeworkModal(true);
   };
 
+  const openAttendanceCheck = () => {
+    if (currentClassStudents.length === 0) {
+      alert("Không có học sinh trong lớp hiện tại để check đi học.");
+      return;
+    }
+    setShowAttendanceModal(true);
+  };
+
   const toggleHomeworkStatus = (studentId: string) => {
     setHomeworkStatuses(prev => ({
       ...prev,
-      [studentId]: prev[studentId] === 'missing' ? 'done' : 'missing'
+      [studentId]: prev[studentId] === 'done' ? 'not-yet' : prev[studentId] === 'not-yet' ? 'missing' : 'done'
+    }));
+  };
+
+  const setHomeworkStatus = (studentId: string, status: HomeworkStatus) => {
+    setHomeworkStatuses(prev => ({
+      ...prev,
+      [studentId]: status
     }));
   };
 
@@ -1652,8 +1670,10 @@ const App: React.FC = () => {
     const timestamp = Date.now();
     const uiEvents: PokemonUiEvent[] = [];
     let doneCount = 0;
+    let notYetCount = 0;
     let missingCount = 0;
     let skippedCount = 0;
+    let releaseEventToShow: PokemonReleaseEvent | null = null;
 
     const updatedStudents = students.map(student => {
       if (!presentStudents.some(present => present.id === student.id)) return student;
@@ -1668,10 +1688,26 @@ const App: React.FC = () => {
       const baseStudent = normalizeStudentPokemonData(student);
       const historyItem: HistoryItem = {
         id: timestamp.toString() + Math.random(),
-        amount: status === 'done' ? 8 : 0,
-        reason: status === 'done' ? `📚 Homework Done (${homeworkLessonDateKey}) (+8 Hào Quang, Pokémon +8 HP)` : `📚 Homework Missing (${homeworkLessonDateKey})`,
+        amount: status === 'done' ? 8 : status === 'missing' ? -10 : 0,
+        reason: status === 'done'
+          ? `📚 Homework Done (${homeworkLessonDateKey}) (+8 Hào Quang, Pokémon +8 HP)`
+          : status === 'missing'
+            ? `📚 Homework Missing (${homeworkLessonDateKey}) (-10 Hào Quang, Pokémon -10 HP)`
+            : `📚 Homework Not Yet (${homeworkLessonDateKey})`,
         timestamp
       };
+
+      if (status === 'not-yet') {
+        notYetCount += 1;
+        return {
+          ...baseStudent,
+          pokemonProgress: {
+            ...baseStudent.pokemonProgress!,
+            lastHomeworkLessonKey: lessonKey
+          },
+          history: [historyItem, ...baseStudent.history].slice(0, 50)
+        };
+      }
 
       if (status === 'missing') {
         missingCount += 1;
@@ -1682,9 +1718,19 @@ const App: React.FC = () => {
           lessonKey,
           timestamp
         });
-        return {
+        let resultStudent = {
           ...result.student,
-          history: [historyItem, ...result.student.history].slice(0, 50)
+          points: result.student.points - 10
+        };
+        if (resultStudent.pet) {
+          const hpUpdate = applyPetHpDelta(resultStudent, -10, 'Homework Missing: mất 10 HP');
+          resultStudent = hpUpdate.student;
+          if (hpUpdate.releaseEvent && !releaseEventToShow) releaseEventToShow = hpUpdate.releaseEvent;
+          uiEvents.push({ type: 'hp', message: `${student.name}: Pokémon -10 HP` });
+        }
+        return {
+          ...resultStudent,
+          history: [historyItem, ...resultStudent.history].slice(0, 50)
         };
       }
 
@@ -1723,6 +1769,7 @@ const App: React.FC = () => {
     });
 
     setStudents(updatedStudents);
+    if (releaseEventToShow) setPokemonReleaseEvent(releaseEventToShow);
     if (editingStudent) {
       const updatedEditingStudent = updatedStudents.find(student => student.id === editingStudent.id);
       if (updatedEditingStudent) setEditingStudent(updatedEditingStudent);
@@ -1731,7 +1778,7 @@ const App: React.FC = () => {
     setHomeworkStatuses({});
 
     const summaryEvents: PokemonUiEvent[] = [
-      { type: 'bond', message: `${doneCount} Done · ${missingCount} Missing${skippedCount ? ` · ${skippedCount} đã chốt` : ''}` },
+      { type: 'bond', message: `${doneCount} Done · ${notYetCount} Not Yet · ${missingCount} Missing${skippedCount ? ` · ${skippedCount} đã chốt` : ''}` },
       ...uiEvents.filter(event => ['xp', 'bond', 'hp', 'streak', 'passive', 'level-up', 'evolution', 'mastery'].includes(event.type)).slice(0, 3)
     ];
     showPokemonReaction(summaryEvents, 'Homework Check đã chốt');
@@ -2004,13 +2051,12 @@ const App: React.FC = () => {
       luckyWheelSpinAudioRef.current.pause();
       luckyWheelSpinAudioRef.current = null;
     }
-    if (wheelSpinSoundUrl.trim()) {
-      const spinAudio = new Audio(wheelSpinSoundUrl);
-      spinAudio.loop = true;
-      spinAudio.volume = 0.55;
-      luckyWheelSpinAudioRef.current = spinAudio;
-      spinAudio.play().catch(() => {});
-    }
+    const spinSoundUrl = wheelSpinSoundUrl.trim() || DEFAULT_WHEEL_SPIN_SOUND_URL;
+    const spinAudio = new Audio(spinSoundUrl);
+    spinAudio.loop = true;
+    spinAudio.volume = 0.55;
+    luckyWheelSpinAudioRef.current = spinAudio;
+    spinAudio.play().catch(() => {});
 
     window.requestAnimationFrame(() => {
       if (luckyWheelRef.current) {
@@ -3037,6 +3083,13 @@ const App: React.FC = () => {
               <input type="text" placeholder="Tìm kiếm học sĩ..." className="flex-1 p-3 rounded-xl border outline-none focus:ring-2 ring-red-800/20" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
               
               <button
+                onClick={openAttendanceCheck}
+                className="bg-sky-700 text-white px-5 py-3 rounded-xl font-black shadow-lg hover:bg-sky-800 transition-all uppercase text-xs tracking-wider"
+              >
+                🧭 Check đi học
+              </button>
+
+              <button
                 onClick={openHomeworkCheck}
                 className="bg-emerald-700 text-white px-5 py-3 rounded-xl font-black shadow-lg hover:bg-emerald-800 transition-all uppercase text-xs tracking-wider"
               >
@@ -3098,6 +3151,7 @@ const App: React.FC = () => {
               onRandom={handleRandom}
               onLudo={() => openLudoForClass()}
               onLuckyWheel={handleOpenLuckyWheel}
+              onPokedex={() => setShowGlobalPokedexModal(true)}
               onGroup={() => setShowGroupModal(true)}
               onTimer={() => setShowTimerModal(true)}
               onSelectAll={handleToggleSelectAll}
@@ -5032,6 +5086,23 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {showGlobalPokedexModal && (
+        <GlobalPokedexModal
+          students={students}
+          getRank={getRank}
+          onClose={() => setShowGlobalPokedexModal(false)}
+        />
+      )}
+
+      {showAttendanceModal && (
+        <AttendanceCheckModal
+          students={currentClassStudents}
+          getRank={getRank}
+          onToggle={handleToggleAbsent}
+          onClose={() => setShowAttendanceModal(false)}
+        />
+      )}
+
       {showHomeworkModal && (
         <HomeworkCheckModal
           students={presentStudents}
@@ -5039,6 +5110,7 @@ const App: React.FC = () => {
           lessonDateKey={homeworkLessonDateKey}
           getRank={getRank}
           onToggle={toggleHomeworkStatus}
+          onSetStatus={setHomeworkStatus}
           onConfirm={handleConfirmHomeworkCheck}
           onClose={() => setShowHomeworkModal(false)}
         />

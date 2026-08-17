@@ -85,6 +85,14 @@
   - Student cards now show current Answer, Battle, and Homework streak badges when active.
   - Rebuilt `docs/pokemon-companion-2-intro.html` as a clearer liquid-glass student-facing feature guide with keyboard navigation.
 - Verified production build with `npm run build` after the follow-up adjustments.
+- Added class workflow follow-up adjustments:
+  - Pokémon reaction toast no longer auto-dismisses; it only closes through the close button or click-outside behavior.
+  - Added a `Pokedex` dock button between Lucky Wheel and Group Maker.
+  - Added `GlobalPokedexModal` showing the full Pokémon database, global discovered/unknown states, owner avatars, type details, and evolution path hover previews.
+  - Lucky Wheel now always starts spin music when pressing the spin button, using the configured sound or a fallback default, and stops when the result is shown.
+  - Added `Check đi học` beside `Check Homework` for quick present/absent toggling.
+  - Homework Check now has three states: Done (+8 Hào Quang, +8 Pokémon HP), Not Yet (no reward/penalty), and Missing (-10 Hào Quang, -10 Pokémon HP).
+- Verified production build with `npm run build` after class workflow follow-up adjustments.
 
 ## Manual Steps Needed
 

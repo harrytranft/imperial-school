@@ -1,12 +1,15 @@
 import React from 'react';
 import { Gender, RankInfo, Student } from '../types';
 
+export type HomeworkStatus = 'done' | 'not-yet' | 'missing';
+
 interface HomeworkCheckModalProps {
   students: Student[];
-  statuses: Record<string, 'done' | 'missing'>;
+  statuses: Record<string, HomeworkStatus>;
   lessonDateKey: string;
   getRank: (pts: number, gender: Gender) => RankInfo;
   onToggle: (studentId: string) => void;
+  onSetStatus: (studentId: string, status: HomeworkStatus) => void;
   onConfirm: () => void;
   onClose: () => void;
 }
@@ -17,11 +20,20 @@ export const HomeworkCheckModal: React.FC<HomeworkCheckModalProps> = ({
   lessonDateKey,
   getRank,
   onToggle,
+  onSetStatus,
   onConfirm,
   onClose
 }) => {
   const checkedCount = students.filter(student => student.pokemonProgress?.lastHomeworkLessonKey === `${student.className}:${lessonDateKey}`).length;
   const actionableCount = students.length - checkedCount;
+  const doneCount = students.filter(student => {
+    const lessonKey = `${student.className}:${lessonDateKey}`;
+    return student.pokemonProgress?.lastHomeworkLessonKey !== lessonKey && (statuses[student.id] || 'done') === 'done';
+  }).length;
+  const notYetCount = students.filter(student => {
+    const lessonKey = `${student.className}:${lessonDateKey}`;
+    return student.pokemonProgress?.lastHomeworkLessonKey !== lessonKey && statuses[student.id] === 'not-yet';
+  }).length;
   const missingCount = students.filter(student => {
     const lessonKey = `${student.className}:${lessonDateKey}`;
     return student.pokemonProgress?.lastHomeworkLessonKey !== lessonKey && statuses[student.id] === 'missing';
@@ -56,16 +68,19 @@ export const HomeworkCheckModal: React.FC<HomeworkCheckModalProps> = ({
                 const rank = getRank(student.points, student.gender);
 
                 return (
-                  <button
+                  <div
                     key={student.id}
-                    disabled={alreadyChecked}
-                    onClick={() => onToggle(student.id)}
+                    onClick={() => {
+                      if (!alreadyChecked) onToggle(student.id);
+                    }}
                     className={`flex min-w-0 items-center gap-3 rounded-2xl border-2 p-3 text-left transition-all ${
                       status === 'locked'
                         ? 'border-gray-200 bg-gray-50 opacity-70'
                         : status === 'missing'
                           ? 'border-rose-300 bg-rose-50 hover:border-rose-500'
-                          : 'border-emerald-200 bg-emerald-50 hover:border-emerald-500'
+                          : status === 'not-yet'
+                            ? 'border-amber-300 bg-amber-50 hover:border-amber-500'
+                            : 'border-emerald-200 bg-emerald-50 hover:border-emerald-500'
                     }`}
                   >
                     <img
@@ -78,16 +93,34 @@ export const HomeworkCheckModal: React.FC<HomeworkCheckModalProps> = ({
                       <p className="truncate text-sm font-black text-gray-900">{student.name}</p>
                       <p className="truncate text-[10px] font-bold text-gray-500">{student.className}</p>
                     </div>
-                    <span className={`shrink-0 rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-wider ${
-                      status === 'locked'
-                        ? 'bg-gray-200 text-gray-600'
-                        : status === 'missing'
-                          ? 'bg-rose-600 text-white'
-                          : 'bg-emerald-600 text-white'
-                    }`}>
-                      {status === 'locked' ? 'Đã chốt' : status === 'missing' ? 'Missing' : 'Done'}
-                    </span>
-                  </button>
+                    {status === 'locked' ? (
+                      <span className="shrink-0 rounded-full bg-gray-200 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-gray-600">
+                        Đã chốt
+                      </span>
+                    ) : (
+                      <div className="grid shrink-0 grid-cols-1 gap-1">
+                        {([
+                          ['done', 'Done', 'bg-emerald-600 text-white border-emerald-600'],
+                          ['not-yet', 'Not Yet', 'bg-amber-500 text-white border-amber-500'],
+                          ['missing', 'Missing', 'bg-rose-600 text-white border-rose-600']
+                        ] as const).map(([value, label, activeClass]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={event => {
+                              event.stopPropagation();
+                              onSetStatus(student.id, value);
+                            }}
+                            className={`rounded-full border px-3 py-1 text-[9px] font-black uppercase tracking-wider transition-all ${
+                              status === value ? activeClass : 'border-gray-200 bg-white text-gray-400 hover:text-gray-700'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -96,7 +129,7 @@ export const HomeworkCheckModal: React.FC<HomeworkCheckModalProps> = ({
 
         <div className="flex flex-col gap-3 border-t border-gray-100 bg-gray-50 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs font-bold text-gray-600">
-            <span className="font-black text-emerald-700">{actionableCount}</span> chưa chốt · <span className="font-black text-rose-600">{missingCount}</span> Missing
+            <span className="font-black text-emerald-700">{doneCount}</span> Done · <span className="font-black text-amber-600">{notYetCount}</span> Not Yet · <span className="font-black text-rose-600">{missingCount}</span> Missing · <span className="font-black text-gray-700">{actionableCount}</span> chưa chốt
           </div>
           <button
             disabled={actionableCount <= 0}
