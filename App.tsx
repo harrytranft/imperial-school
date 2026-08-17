@@ -437,6 +437,7 @@ const App: React.FC = () => {
     ranks: false,
     skills: false,
     petSkills: false,
+    pokemonReset: false,
     ludo: false,
     luckyWheel: false,
     data: false
@@ -1538,6 +1539,110 @@ const App: React.FC = () => {
       setSelectedStudentIds([]);
       setIsMultiSelectMode(false);
     }
+  };
+
+  const resetPokemonLevelToOne = (pet: PokemonPet): PokemonPet => {
+    return normalizePokemonPet({
+      ...pet,
+      level: 1,
+      xp: 0,
+      totalXp: 0,
+      masteryXp: 0,
+      masteryStars: 0
+    });
+  };
+
+  const resetStudentPokemonLevels = (student: Student): Student => {
+    const currentPets = student.pets && student.pets.length > 0 ? student.pets : (student.pet ? [student.pet] : []);
+    const resetPets = currentPets.map(resetPokemonLevelToOne);
+    const activePet = student.pet ? resetPokemonLevelToOne(student.pet) : undefined;
+    const mergedPets = activePet
+      ? [activePet, ...resetPets.filter(pet => !isSamePokemon(pet, activePet))]
+      : resetPets;
+    const uniquePets = mergedPets.filter((pet, index, pets) => pets.findIndex(candidate => isSamePokemon(candidate, pet)) === index);
+
+    return {
+      ...student,
+      pet: activePet,
+      pets: uniquePets
+    };
+  };
+
+  const handleResetPokemonLevels = () => {
+    const affectedCount = students.filter(student => student.pet || (student.pets && student.pets.length > 0)).length;
+    if (affectedCount === 0) {
+      alert('Chưa có học sinh nào có Pokémon để reset level.');
+      return;
+    }
+    if (!window.confirm(`Reset level toàn bộ Pokémon của ${affectedCount} học sinh về Level 1? Hào Quang, HP, kỹ năng và phụ kiện vẫn được giữ nguyên.`)) {
+      return;
+    }
+
+    const updatedStudents = students.map(resetStudentPokemonLevels);
+    setStudents(updatedStudents);
+
+    if (editingStudent) {
+      const updatedEditingStudent = updatedStudents.find(student => student.id === editingStudent.id);
+      if (updatedEditingStudent) setEditingStudent(updatedEditingStudent);
+    }
+    if (randomStudent) {
+      const updatedRandomStudent = updatedStudents.find(student => student.id === randomStudent.id);
+      if (updatedRandomStudent) setRandomStudent(updatedRandomStudent);
+    }
+
+    showPokemonReaction(
+      [{ type: 'level-up', message: `${affectedCount} học sinh: Pokémon đã về Level 1` }],
+      'Reset Level Pokémon'
+    );
+  };
+
+  const handleResetSelectedAura = () => {
+    if (selectedStudentIds.length === 0) {
+      alert('Hãy chọn học sinh cần reset Hào Quang trước.');
+      return;
+    }
+    const selectedStudents = students.filter(student => selectedStudentIds.includes(student.id));
+    if (selectedStudents.length === 0) {
+      alert('Không tìm thấy học sinh đã chọn.');
+      return;
+    }
+    if (!window.confirm(`Reset Hào Quang của ${selectedStudents.length} học sinh đã chọn về 0? Pokémon hiện có vẫn được giữ nguyên.`)) {
+      return;
+    }
+
+    const timestamp = Date.now();
+    const selectedSet = new Set(selectedStudentIds);
+    const updatedStudents = students.map(student => {
+      if (!selectedSet.has(student.id)) return student;
+      const historyItem: HistoryItem = {
+        id: `${timestamp}${Math.random()}`,
+        amount: -student.points,
+        reason: '🧹 Reset Hào Quang về 0',
+        timestamp
+      };
+      return {
+        ...student,
+        points: 0,
+        history: [historyItem, ...student.history].slice(0, 50)
+      };
+    });
+
+    setStudents(updatedStudents);
+    if (editingStudent && selectedSet.has(editingStudent.id)) {
+      const updatedEditingStudent = updatedStudents.find(student => student.id === editingStudent.id);
+      if (updatedEditingStudent) setEditingStudent(updatedEditingStudent);
+    }
+    if (randomStudent && selectedSet.has(randomStudent.id)) {
+      const updatedRandomStudent = updatedStudents.find(student => student.id === randomStudent.id);
+      if (updatedRandomStudent) setRandomStudent(updatedRandomStudent);
+    }
+    setSelectedStudentIds([]);
+    setIsMultiSelectMode(false);
+
+    showPokemonReaction(
+      [{ type: 'bond', message: `${selectedStudents.length} học sinh đã reset Hào Quang về 0` }],
+      'Reset Hào Quang'
+    );
   };
 
   const toggleAttendance = (id: string) => {
@@ -3087,6 +3192,7 @@ const App: React.FC = () => {
               onSelectAll={handleToggleSelectAll}
               isMultiSelectMode={isMultiSelectMode}
               onToggleMultiSelect={() => { setIsMultiSelectMode(!isMultiSelectMode); setSelectedStudentIds([]); }}
+              onResetAura={handleResetSelectedAura}
               selectedCount={selectedStudentIds.length}
               user={user}
               isSyncing={isSyncing}
@@ -3821,6 +3927,21 @@ const App: React.FC = () => {
                     <textarea value={sk.description} onChange={e => updatePetSkill(sk.id, 'description', e.target.value)} className="w-full min-h-20 border border-indigo-100 rounded-2xl p-3 text-xs outline-none focus:ring-2 ring-indigo-100 resize-y" />
                   </div>
                 ))}
+              </div>
+            </SettingsSection>
+
+            <SettingsSection id="pokemonReset" icon="🧬" title="Reset Pokémon" subtitle="Đưa toàn bộ Pokémon hiện có về Level 1 mà vẫn giữ Hào Quang, HP, kỹ năng và phụ kiện." className="bg-emerald-50 p-6 sm:p-10 rounded-[40px] border-4 border-emerald-200 text-left space-y-6 my-8" collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
+              <div className="bg-white p-6 rounded-3xl border border-emerald-100 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
+                <div className="text-left space-y-1">
+                  <h4 className="font-black text-emerald-950 text-sm uppercase">Reset Level Pokémon</h4>
+                  <p className="text-xs text-emerald-800/80 font-sans">Tất cả Pokémon của học sinh sẽ trở về Level 1, XP/Mastery về 0.</p>
+                </div>
+                <button
+                  onClick={handleResetPokemonLevels}
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-wider shadow-lg active:scale-95 transition-all"
+                >
+                  Reset Level
+                </button>
               </div>
             </SettingsSection>
 

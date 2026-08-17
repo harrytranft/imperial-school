@@ -20,6 +20,7 @@ interface LiquidDockProps {
   onSelectAll: () => void;
   isMultiSelectMode: boolean;
   onToggleMultiSelect: () => void;
+  onResetAura: () => void;
   selectedCount: number;
   user: any;
   isSyncing: boolean;
@@ -38,6 +39,7 @@ export const LiquidDock: React.FC<LiquidDockProps> = ({
   onSelectAll,
   isMultiSelectMode,
   onToggleMultiSelect,
+  onResetAura,
   selectedCount,
   user,
   isSyncing,
@@ -101,6 +103,13 @@ export const LiquidDock: React.FC<LiquidDockProps> = ({
       color: isMultiSelectMode 
         ? 'from-red-600 via-red-700 to-red-900' 
         : 'from-amber-100 via-amber-200 to-amber-300 text-amber-950',
+    },
+    {
+      id: 'reset-aura',
+      label: selectedCount > 0 ? `Reset Hào Quang (${selectedCount})` : 'Reset Hào Quang',
+      icon: '🧹',
+      onClick: onResetAura,
+      color: 'from-rose-100 via-red-200 to-red-400 text-red-950',
     },
   ];
 
