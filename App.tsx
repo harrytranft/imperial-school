@@ -10,10 +10,30 @@ import {
 } from './constants';
 import { StudentCard } from './components/StudentCard';
 import { LiquidDock } from './components/LiquidDock';
+import { HomeworkCheckModal } from './components/HomeworkCheckModal';
+import { PokemonMiniStatus } from './components/PokemonMiniStatus';
+import { PokemonPassiveBadge } from './components/PokemonPassiveBadge';
+import { PokemonPokedexPanel } from './components/PokemonPokedexPanel';
+import { PokemonReactionToast } from './components/PokemonReactionToast';
 import { generateEdict } from './geminiService';
-import { LIST_POKEMONS, LIST_PET_SKILLS as DEFAULT_PET_SKILLS, PetSkill, getRandomPokemon, getEvolvedForm } from './pokemonData';
+import { LIST_POKEMONS, LIST_PET_SKILLS as DEFAULT_PET_SKILLS, PetSkill, getRandomPokemon } from './pokemonData';
 import { useAuth } from './AuthContext';
 import { fetchUserSettings, upsertUserSettings } from './supabaseData';
+import { applyGameEventToStudent, GameEventSource, PokemonUiEvent } from './gameEvents';
+import {
+  createPokemonPetFromDexId,
+  getPokemonArtworkUrl,
+  getPokemonDisplayName,
+  getNextMasteryTarget,
+  getNextEvolutionPreview,
+  isSamePokemonPet,
+  markPokemonDiscovered,
+  normalizePokemonPet,
+  normalizeStudentPokemonData,
+  totalXpForLevel,
+  updatePetInCollection,
+  xpNeededForNextLevel
+} from './pokemonProgression';
 
 
 type Screen = 'school' | 'class' | 'profile' | 'settings';
@@ -32,7 +52,15 @@ interface PokemonReleaseEvent {
   studentName: string;
   releasedPet: PokemonPet;
   remainingPets: PokemonPet[];
+  cause?: string;
 }
+
+const getLocalDateKey = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 const AuthLoginForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
   const { loginWithEmail, signUpWithEmail } = useAuth();
@@ -248,6 +276,10 @@ const App: React.FC = () => {
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'positive' | 'negative'>('positive');
+  const [feedbackSource, setFeedbackSource] = useState<GameEventSource>('manual');
+  const [pokemonReactionEvents, setPokemonReactionEvents] = useState<PokemonUiEvent[]>([]);
+  const [pokemonReactionTitle, setPokemonReactionTitle] = useState('Tiến triển Pokémon');
+  const pokemonReactionTimerRef = useRef<number | null>(null);
   
   const [searchQuery, setSearchQuery] = useState('');
   const [sortType, setSortType] = useState<'name' | 'points-desc' | 'points-asc'>('points-desc');
@@ -259,6 +291,8 @@ const App: React.FC = () => {
   // Modals
   const [showRandomModal, setShowRandomModal] = useState(false);
   const [randomStudent, setRandomStudent] = useState<Student | null>(null);
+  const [showHomeworkModal, setShowHomeworkModal] = useState(false);
+  const [homeworkStatuses, setHomeworkStatuses] = useState<Record<string, 'done' | 'missing'>>({});
   const [randomMode, setRandomMode] = useState<'solo' | 'battle'>('solo');
   const [battleStudentA, setBattleStudentA] = useState<Student | null>(null);
   const [battleStudentB, setBattleStudentB] = useState<Student | null>(null);
@@ -408,6 +442,27 @@ const App: React.FC = () => {
     }
   }, [profile, showUserModal]);
 
+  useEffect(() => {
+    return () => {
+      if (pokemonReactionTimerRef.current) {
+        window.clearTimeout(pokemonReactionTimerRef.current);
+      }
+    };
+  }, []);
+
+  const showPokemonReaction = (events: PokemonUiEvent[], title = 'Tiến triển Pokémon') => {
+    if (events.length === 0) return;
+    if (pokemonReactionTimerRef.current) {
+      window.clearTimeout(pokemonReactionTimerRef.current);
+    }
+    setPokemonReactionTitle(title);
+    setPokemonReactionEvents(events.slice(0, 4));
+    pokemonReactionTimerRef.current = window.setTimeout(() => {
+      setPokemonReactionEvents([]);
+      pokemonReactionTimerRef.current = null;
+    }, 1200);
+  };
+
   // Sync state FROM Supabase on login (high priority)
   useEffect(() => {
     if (authLoading) return;
@@ -426,7 +481,10 @@ const App: React.FC = () => {
         const cloudData = await fetchUserSettings(user.uid);
 
         if (cloudData) {
-          if (cloudData.students && Array.isArray(cloudData.students)) setStudents(cloudData.students);
+          const cloudStudents = Array.isArray(cloudData.students)
+            ? cloudData.students.map(normalizeStudentPokemonData)
+            : [];
+          if (cloudData.students && Array.isArray(cloudData.students)) setStudents(cloudStudents);
           if (cloudData.ranksMale && Array.isArray(cloudData.ranksMale)) setRanksMale(cloudData.ranksMale);
           if (cloudData.ranksFemale && Array.isArray(cloudData.ranksFemale)) setRanksFemale(cloudData.ranksFemale);
           if (cloudData.skills && Array.isArray(cloudData.skills)) setSkills(cloudData.skills);
@@ -452,7 +510,7 @@ const App: React.FC = () => {
 
           // Save snapshot ref to prevent immediate re-sync of unchanged data
           lastSyncedSnapshotRef.current = JSON.stringify({
-            students: cloudData.students || [],
+            students: cloudStudents,
             ranksMale: cloudData.ranksMale || [],
             ranksFemale: cloudData.ranksFemale || [],
             skills: cloudData.skills || [],
@@ -467,7 +525,7 @@ const App: React.FC = () => {
           });
 
           // Also save a fallback local copy
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudData.students || []));
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudStudents));
           if (cloudData.ranksMale) localStorage.setItem(RANKS_KEY_MALE, JSON.stringify(cloudData.ranksMale));
           if (cloudData.ranksFemale) localStorage.setItem(RANKS_KEY_FEMALE, JSON.stringify(cloudData.ranksFemale));
           if (cloudData.skills) localStorage.setItem(SKILLS_KEY, JSON.stringify(cloudData.skills));
@@ -483,7 +541,7 @@ const App: React.FC = () => {
           let localStudents: Student[] = [];
           if (saved) {
             try {
-              localStudents = JSON.parse(saved);
+              localStudents = JSON.parse(saved).map(normalizeStudentPokemonData);
             } catch (err) {
               console.error(err);
             }
@@ -678,7 +736,7 @@ const App: React.FC = () => {
               };
             }
             return s;
-          });
+          }).map(normalizeStudentPokemonData);
           setStudents(migrated);
         } catch (err) {
           console.error("Failed to parse saved students", err);
@@ -777,6 +835,8 @@ const App: React.FC = () => {
   }, [students, filterClass, searchQuery, sortType]);
 
   const presentStudents = useMemo(() => currentClassStudents.filter(s => !s.isAbsent), [currentClassStudents]);
+  const homeworkLessonDateKey = getLocalDateKey();
+  const editingPetEvolutionPreview = useMemo(() => getNextEvolutionPreview(editingStudent?.pet), [editingStudent?.pet]);
   const classOptions = useMemo(() => classes.filter(c => c !== 'Tất cả'), [classes]);
   const luckyWheelBackground = useMemo(() => {
     const rewardsForWheel = luckyWheelDisplayRewards.length > 0 ? luckyWheelDisplayRewards : luckyWheelRewards;
@@ -831,11 +891,10 @@ const App: React.FC = () => {
   };
 
   const isSamePokemon = (a?: PokemonPet, b?: PokemonPet) => {
-    if (!a || !b) return false;
-    return a.dexId === b.dexId && a.name === b.name && (a.baseDexId || a.dexId) === (b.baseDexId || b.dexId);
+    return isSamePokemonPet(a, b);
   };
 
-  const releasePetFromStudent = (student: Student, releasedPet: PokemonPet, reason: string) => {
+  const releasePetFromStudent = (student: Student, releasedPet: PokemonPet, reason: string, cause?: string) => {
     const currentPets = student.pets && student.pets.length > 0 ? student.pets : (student.pet ? [student.pet] : []);
     const remainingPets = currentPets.filter(p => !isSamePokemon(p, releasedPet));
     const historyItem: HistoryItem = {
@@ -844,11 +903,12 @@ const App: React.FC = () => {
       reason,
       timestamp: Date.now()
     };
+    const discoveredStudent = markPokemonDiscovered(student, releasedPet);
     const nextStudent: Student = {
-      ...student,
+      ...discoveredStudent,
       pet: undefined,
       pets: remainingPets,
-      history: [historyItem, ...student.history].slice(0, 50)
+      history: [historyItem, ...discoveredStudent.history].slice(0, 50)
     };
     return {
       student: nextStudent,
@@ -856,7 +916,8 @@ const App: React.FC = () => {
         studentId: student.id,
         studentName: student.name,
         releasedPet,
-        remainingPets
+        remainingPets,
+        cause
       } as PokemonReleaseEvent
     };
   };
@@ -869,7 +930,8 @@ const App: React.FC = () => {
       const release = releasePetFromStudent(
         { ...student, pet: updatedPet, pets: updateActivePetInCollection(student, updatedPet) },
         updatedPet,
-        `🌲 ${updatedPet.name} đã được thả về rừng vì hết HP. ${historyReason}`
+        `🌲 ${getPokemonDisplayName(updatedPet)} đã được thả về rừng vì hết HP. ${historyReason}`,
+        historyReason
       );
       return { student: release.student, releaseEvent: release.event };
     }
@@ -888,7 +950,8 @@ const App: React.FC = () => {
     if (!pokemonReleaseEvent) return;
     setStudents(prev => prev.map(s => {
       if (s.id !== pokemonReleaseEvent.studentId) return s;
-      const nextStudent = { ...s, pet };
+      const nextPet = normalizePokemonPet(pet);
+      const nextStudent = { ...s, pet: nextPet, pets: updatePetInCollection(s, nextPet) };
       if (editingStudent?.id === s.id) setEditingStudent(nextStudent);
       return nextStudent;
     }));
@@ -906,7 +969,7 @@ const App: React.FC = () => {
     setPokemonReleaseEvent(null);
   };
 
-  const handleUpdatePoints = async (ids: string[], amount: number, reason: string) => {
+  const handleUpdatePoints = async (ids: string[], amount: number, reason: string, source: GameEventSource = 'manual') => {
     if (isNaN(amount)) return;
 
     // Play Sound using dynamic URLs
@@ -915,6 +978,7 @@ const App: React.FC = () => {
 
     let hatchedNames: string[] = [];
     let evolvedMessages: string[] = [];
+    let progressionEvents: PokemonUiEvent[] = [];
     let releaseEventToShow: PokemonReleaseEvent | null = null;
 
     const updatedStudents = students.map(s => {
@@ -922,97 +986,72 @@ const App: React.FC = () => {
         const oldRank = getRank(s.points, s.gender);
         const newPoints = s.points + amount;
         const newRank = getRank(newPoints, s.gender);
-        
         const history: HistoryItem = { id: Date.now().toString() + Math.random(), amount, reason, timestamp: Date.now() };
-        
-        // Instant check for edict on first student if rank changed
+
         if (ids.length === 1 && oldRank.id !== newRank.id) {
           generateEdict(s.name, newRank.title, newPoints > s.points).then(setEdict);
         }
 
-        // Egg and Pet logic
         let currentEgg = s.egg ? { ...s.egg } : { progress: 0, status: 'egg' as const, assignedDexId: LIST_POKEMONS[Math.floor(Math.random() * LIST_POKEMONS.length)].dexId };
-        let currentPet = s.pet ? { ...s.pet } : undefined;
-        let currentPets = s.pets ? [...s.pets] : (currentPet ? [currentPet] : []);
-        let releaseHistory: HistoryItem | null = null;
+        let currentStudent = normalizeStudentPokemonData(s);
 
         if (amount > 0 && currentEgg.status === 'egg') {
           const nextProgress = currentEgg.progress + amount;
           currentEgg.progress = Math.min(10, nextProgress);
-          
+
           if (currentEgg.progress >= 10) {
             currentEgg.status = 'hatched';
-            const pokeMeta = LIST_POKEMONS.find(p => p.dexId === currentEgg.assignedDexId) || LIST_POKEMONS[0];
-            
-            const originalBaseId = pokeMeta.dexId;
-            const evolved = getEvolvedForm(originalBaseId, newPoints);
-            
-            currentPet = {
-              dexId: evolved.dexId,
-              name: evolved.name,
-              types: evolved.types,
-              hp: 100,
-              accessories: [],
-              skills: [],
-              baseDexId: originalBaseId
+            const hatchedPet = createPokemonPetFromDexId(currentEgg.assignedDexId);
+            currentStudent = {
+              ...currentStudent,
+              pet: hatchedPet,
+              pets: [hatchedPet, ...(currentStudent.pets || []).filter(p => !isSamePokemon(p, hatchedPet))]
             };
-            currentPets = [currentPet, ...currentPets.filter(p => !isSamePokemon(p, currentPet))];
             hatchedNames.push(s.name);
           }
-        } else if (currentPet) {
-          // Evolution & HP update on point change (+3 pts -> +3 HP, -3 pts -> -3 HP)
-          const originalBaseId = currentPet.baseDexId || currentPet.dexId;
-          const evolved = getEvolvedForm(originalBaseId, newPoints);
-          const oldHp = currentPet.hp ?? 100;
-          const newHp = Math.min(100, Math.max(0, oldHp + amount));
-
-          if (evolved.dexId !== currentPet.dexId) {
-            currentPet = {
-              ...currentPet,
-              baseDexId: originalBaseId,
-              dexId: evolved.dexId,
-              name: evolved.name,
-              types: evolved.types,
-              hp: newHp
-            };
-            evolvedMessages.push(`Linh thú của ${s.name} đã tiến hóa thành ${evolved.name}! 🔥🧬`);
-          } else {
-            currentPet = {
-              ...currentPet,
-              baseDexId: originalBaseId,
-              hp: newHp
-            };
-          }
-          currentPets = currentPets.map(p => isSamePokemon(p, s.pet) ? currentPet! : p);
-
-          if ((currentPet.hp ?? 100) <= 0) {
-            const releasedPet = currentPet;
-            currentPets = currentPets.filter(p => !isSamePokemon(p, releasedPet));
-            currentPet = undefined;
-            releaseHistory = {
-              id: Date.now().toString() + Math.random(),
-              amount: 0,
-              reason: `🌲 ${releasedPet.name} đã được thả về rừng vì hết HP.`,
-              timestamp: Date.now()
-            };
-            if (!releaseEventToShow) {
-              releaseEventToShow = {
-                studentId: s.id,
-                studentName: s.name,
-                releasedPet,
-                remainingPets: currentPets
-              };
-            }
+        } else if (currentStudent.pet) {
+          const hpUpdate = applyPetHpDelta(currentStudent, amount, `${reason}: ${amount >= 0 ? 'hồi' : 'mất'} ${Math.abs(amount)} HP`);
+          currentStudent = hpUpdate.student;
+          if (hpUpdate.releaseEvent && !releaseEventToShow) {
+            releaseEventToShow = hpUpdate.releaseEvent;
           }
         }
 
-        return { 
-          ...s, 
-          points: newPoints, 
-          history: [releaseHistory, history, ...s.history].filter(Boolean).slice(0, 50) as HistoryItem[],
+        if (source === 'solo') {
+          const progressionResult = applyGameEventToStudent(
+            { ...currentStudent, points: newPoints },
+            {
+              type: 'SOLO_RESULT',
+              source,
+              studentId: s.id,
+              auraDelta: amount,
+              timestamp: Date.now()
+            }
+          );
+          currentStudent = progressionResult.student;
+          progressionEvents = [...progressionEvents, ...progressionResult.uiEvents];
+          progressionResult.uiEvents
+            .filter(event => event.type === 'evolution')
+            .forEach(event => evolvedMessages.push(`Linh thú của ${s.name}: ${event.message}!`));
+        }
+
+        const pokedex = { ...(currentStudent.pokedex || {}) };
+        (currentStudent.pets || []).forEach(pet => {
+          pokedex[pet.dexId] = {
+            ...(pokedex[pet.dexId] || {}),
+            dexId: pet.dexId,
+            discovered: true,
+            shinyDiscovered: pokedex[pet.dexId]?.shinyDiscovered || pet.isShiny,
+            firstDiscoveredAt: pokedex[pet.dexId]?.firstDiscoveredAt || Date.now()
+          };
+        });
+
+        return {
+          ...currentStudent,
+          points: newPoints,
+          history: [history, ...currentStudent.history].slice(0, 50),
           egg: currentEgg,
-          pet: currentPet,
-          pets: currentPets
+          pokedex
         };
       }
       return s;
@@ -1026,8 +1065,30 @@ const App: React.FC = () => {
       const updatedSelf = updatedStudents.find(x => x.id === editingStudent.id);
       if (updatedSelf) setEditingStudent(updatedSelf);
     }
+    if (randomStudent && ids.includes(randomStudent.id)) {
+      const updatedRandomStudent = updatedStudents.find(x => x.id === randomStudent.id);
+      if (updatedRandomStudent) setRandomStudent(updatedRandomStudent);
+    }
 
-    if (hatchedNames.length > 0) {
+    if (source === 'solo' && !releaseEventToShow) {
+      const toastEvents: PokemonUiEvent[] = [
+        ...progressionEvents.filter(event => ['xp', 'bond', 'streak', 'passive', 'charge-ready', 'level-up', 'evolution', 'hp', 'random-drop', 'mastery'].includes(event.type))
+      ];
+      if (hatchedNames.length > 0) {
+        toastEvents.unshift({
+          type: 'evolution',
+          message: `Trứng của ${hatchedNames.join(', ')} đã nở`
+        });
+      }
+      const hasActivePetAfterUpdate = updatedStudents.some(student => ids.includes(student.id) && !!student.pet);
+      if (amount !== 0 && hasActivePetAfterUpdate) {
+        toastEvents.push({
+          type: 'hp',
+          message: amount > 0 ? `HP +${amount}` : `HP -${Math.abs(amount)}`
+        });
+      }
+      showPokemonReaction(toastEvents, amount >= 0 ? 'Pokémon phản ứng vui vẻ' : 'Pokémon vẫn cố gắng');
+    } else if (hatchedNames.length > 0) {
       setHatchSuccessMessage(`Tin vui chấn động triều đình! Quả trứng của học sĩ ${hatchedNames.join(', ')} đã nứt vỡ ra một Pokémon Cưng vô cùng đáng yêu! 🥚🐣💖`);
       setShowHatchModal(true);
     } else if (evolvedMessages.length > 0) {
@@ -1036,9 +1097,12 @@ const App: React.FC = () => {
     }
 
     setShowSkillModal(false);
-    setShowRandomModal(false);
+    if (source !== 'solo') {
+      setShowRandomModal(false);
+    }
+    setFeedbackSource('manual');
     setManualPoints('');
-    setSelectedStudentIds([]);
+    setSelectedStudentIds(source === 'solo' ? ids : []);
     setIsMultiSelectMode(false);
   };
 
@@ -1073,6 +1137,7 @@ const App: React.FC = () => {
           ...s,
           points: newPoints,
           pet: updatedPet,
+          pets: updatePetInCollection(s, updatedPet),
           history: [historyItem, ...s.history].slice(0, 50)
         };
         // Update editingStudent too!
@@ -1091,8 +1156,13 @@ const App: React.FC = () => {
     if (!newName.trim()) return;
     const updatedStudents = students.map(s => {
       if (s.id === studentId && s.pet) {
-        const updatedPet = { ...s.pet, name: newName };
-        const updatedS = { ...s, pet: updatedPet };
+        const trimmedName = newName.trim();
+        const updatedPet = {
+          ...s.pet,
+          nickname: trimmedName,
+          name: trimmedName
+        };
+        const updatedS = { ...s, pet: updatedPet, pets: updatePetInCollection(s, updatedPet) };
         setEditingStudent(updatedS);
         return updatedS;
       }
@@ -1103,13 +1173,13 @@ const App: React.FC = () => {
 
   const handleBuyNewEgg = (studentId: string) => {
     const s = students.find(x => x.id === studentId);
-    if (!s) return;
+    if (!s) return false;
     const cost = 10;
     if (s.points < cost) {
       alert(`Không đủ Hào quang! Học sĩ cần tối thiểu ${cost} điểm để thỉnh Quả trứng mới.`);
-      return;
+      return false;
     }
-    if (!window.confirm(`Bạn có đồng ý thỉnh thêm một quả Quả Trứng Pokemon mới bằng cách tiêu hao 10đ Hào Quang?`)) return;
+    if (!window.confirm(`Bạn có đồng ý thỉnh thêm một quả Quả Trứng Pokemon mới bằng cách tiêu hao 10đ Hào Quang?`)) return false;
 
     const randomDexId = LIST_POKEMONS[Math.floor(Math.random() * LIST_POKEMONS.length)].dexId;
     
@@ -1117,7 +1187,7 @@ const App: React.FC = () => {
     const currentActivePet = s.pet;
     let ownedPets = s.pets ? [...s.pets] : [];
     if (currentActivePet) {
-      const exists = ownedPets.some(p => p.dexId === currentActivePet.dexId);
+      const exists = ownedPets.some(p => isSamePokemon(p, currentActivePet));
       if (!exists) {
         ownedPets.push(currentActivePet);
       }
@@ -1148,6 +1218,7 @@ const App: React.FC = () => {
     setEditingStudent(updatedS);
     new Audio(posSoundUrl).play().catch(() => {});
     alert("Mua trứng cổ đại thế hệ mới thành công! Hãy tích cực cộng điểm giúp sinh linh sớm thức tỉnh vỏ trứng.");
+    return true;
   };
 
   const handleSelectActivePet = (studentId: string, chosenPet: PokemonPet) => {
@@ -1158,33 +1229,24 @@ const App: React.FC = () => {
     
     // Backup active pet if any
     if (s.pet) {
-      const exists = ownedPets.some(p => p.dexId === s.pet!.dexId);
+      const exists = ownedPets.some(p => isSamePokemon(p, s.pet));
       if (!exists) {
         ownedPets.push(s.pet);
       }
     }
 
     // Load selected pet as active
-    const nextPet = { ...chosenPet };
-    const nextPoints = s.points; // preserve points
-    
-    // Ensure pet is evolved to match current points level!
-    const originalBaseId = nextPet.baseDexId || nextPet.dexId;
-    const evolved = getEvolvedForm(originalBaseId, nextPoints);
-    nextPet.dexId = evolved.dexId;
-    nextPet.name = evolved.name;
-    nextPet.types = evolved.types;
-    nextPet.baseDexId = originalBaseId;
+    const nextPet = normalizePokemonPet(chosenPet);
 
-    const updatedS: Student = {
+    const updatedS: Student = markPokemonDiscovered({
       ...s,
       pet: nextPet,
-      pets: ownedPets
-    };
+      pets: updatePetInCollection({ ...s, pets: ownedPets }, nextPet)
+    }, nextPet);
 
     setStudents(prev => prev.map(x => x.id === studentId ? updatedS : x));
     setEditingStudent(updatedS);
-    alert(`Linh thú ${nextPet.name} đã hiện diện kề vai sát cánh cùng học sĩ!`);
+    alert(`Linh thú ${getPokemonDisplayName(nextPet)} đã hiện diện kề vai sát cánh cùng học sĩ!`);
   };
 
   const handleUsePetSkill = (studentId: string, skillId: string, skillName: string) => {
@@ -1231,6 +1293,7 @@ const App: React.FC = () => {
     const updatedS: Student = {
       ...s,
       pet: updatedPet,
+      pets: updatePetInCollection(s, updatedPet),
       history: [historyItem, ...s.history].slice(0, 50)
     };
 
@@ -1274,8 +1337,11 @@ const App: React.FC = () => {
         const text = event.target?.result as string;
         const data = JSON.parse(text);
 
+        const importedStudents = data.students && Array.isArray(data.students)
+          ? data.students.map(normalizeStudentPokemonData)
+          : [];
         if (data.students && Array.isArray(data.students)) {
-          setStudents(data.students);
+          setStudents(importedStudents);
         }
         if (data.skills && Array.isArray(data.skills)) {
           setSkills(data.skills);
@@ -1319,7 +1385,7 @@ const App: React.FC = () => {
         if (user) {
           setIsSyncing(true);
           upsertUserSettings(user.uid, {
-              students: data.students || [],
+              students: importedStudents,
               ranksMale: data.ranksMale || [],
               ranksFemale: data.ranksFemale || [],
               skills: data.skills || [],
@@ -1485,6 +1551,102 @@ const App: React.FC = () => {
     }
   };
 
+  const openHomeworkCheck = () => {
+    if (presentStudents.length === 0) {
+      alert("Không có học sinh đang hiện diện để check BTVN.");
+      return;
+    }
+    const defaultStatuses: Record<string, 'done' | 'missing'> = {};
+    presentStudents.forEach(student => {
+      defaultStatuses[student.id] = 'done';
+    });
+    setHomeworkStatuses(defaultStatuses);
+    setShowHomeworkModal(true);
+  };
+
+  const toggleHomeworkStatus = (studentId: string) => {
+    setHomeworkStatuses(prev => ({
+      ...prev,
+      [studentId]: prev[studentId] === 'missing' ? 'done' : 'missing'
+    }));
+  };
+
+  const handleConfirmHomeworkCheck = () => {
+    const timestamp = Date.now();
+    const uiEvents: PokemonUiEvent[] = [];
+    let doneCount = 0;
+    let missingCount = 0;
+    let skippedCount = 0;
+
+    const updatedStudents = students.map(student => {
+      if (!presentStudents.some(present => present.id === student.id)) return student;
+
+      const lessonKey = `${student.className}:${homeworkLessonDateKey}`;
+      if (student.pokemonProgress?.lastHomeworkLessonKey === lessonKey) {
+        skippedCount += 1;
+        return student;
+      }
+
+      const status = homeworkStatuses[student.id] || 'done';
+      const baseStudent = normalizeStudentPokemonData(student);
+      const historyItem: HistoryItem = {
+        id: timestamp.toString() + Math.random(),
+        amount: 0,
+        reason: status === 'done' ? `📚 Homework Done (${homeworkLessonDateKey})` : `📚 Homework Missing (${homeworkLessonDateKey})`,
+        timestamp
+      };
+
+      if (status === 'missing') {
+        missingCount += 1;
+        const result = applyGameEventToStudent(baseStudent, {
+          type: 'HOMEWORK_MISSING',
+          source: 'homework',
+          studentId: student.id,
+          lessonKey,
+          timestamp
+        });
+        return {
+          ...result.student,
+          history: [historyItem, ...result.student.history].slice(0, 50)
+        };
+      }
+
+      doneCount += 1;
+      const result = applyGameEventToStudent(baseStudent, {
+        type: 'HOMEWORK_COMPLETE',
+        source: 'homework',
+        studentId: student.id,
+        lessonKey,
+        timestamp
+      });
+      uiEvents.push(...result.uiEvents);
+
+      const nextEgg = !result.student.pet && result.student.egg?.status === 'egg'
+        ? { ...result.student.egg, progress: Math.min(10, result.student.egg.progress + 1) }
+        : result.student.egg;
+
+      return {
+        ...result.student,
+        egg: nextEgg,
+        history: [historyItem, ...result.student.history].slice(0, 50)
+      };
+    });
+
+    setStudents(updatedStudents);
+    if (editingStudent) {
+      const updatedEditingStudent = updatedStudents.find(student => student.id === editingStudent.id);
+      if (updatedEditingStudent) setEditingStudent(updatedEditingStudent);
+    }
+    setShowHomeworkModal(false);
+    setHomeworkStatuses({});
+
+    const summaryEvents: PokemonUiEvent[] = [
+      { type: 'bond', message: `${doneCount} Done · ${missingCount} Missing${skippedCount ? ` · ${skippedCount} đã chốt` : ''}` },
+      ...uiEvents.filter(event => ['xp', 'bond', 'streak', 'passive', 'level-up', 'evolution', 'mastery'].includes(event.type)).slice(0, 3)
+    ];
+    showPokemonReaction(summaryEvents, 'Homework Check đã chốt');
+  };
+
   const handleRandom = (forceMode?: 'solo' | 'battle') => {
     setBattleResultSummary(null);
     const available = presentStudents;
@@ -1541,20 +1703,12 @@ const App: React.FC = () => {
   const prepareLuckyWheelResult = (student: Student, reward: LuckyWheelReward): LuckyWheelResult => {
     if (reward.type === 'pokemon') {
       const randomPokemon = getRandomPokemon();
-      const giftedPet: PokemonPet = {
-        dexId: randomPokemon.dexId,
-        name: randomPokemon.name,
-        types: randomPokemon.types,
-        hp: 100,
-        accessories: [],
-        skills: [],
-        baseDexId: randomPokemon.dexId
-      };
+      const giftedPet = createPokemonPetFromDexId(randomPokemon.dexId);
       return {
         student,
         reward,
         pokemon: giftedPet,
-        message: `${student.name} nhận được Pokémon ${giftedPet.name}!`
+        message: `${student.name} nhận được ${giftedPet.isShiny ? 'Shiny ' : ''}Pokémon ${getPokemonDisplayName(giftedPet)}!`
       };
     }
 
@@ -1566,7 +1720,7 @@ const App: React.FC = () => {
         student,
         reward,
         skill: giftedSkill,
-        message: `${student.name} nhận thêm tuyệt chiêu ${giftedSkill.name} cho ${student.pet.name}!`
+        message: `${student.name} nhận thêm tuyệt chiêu ${giftedSkill.name} cho ${getPokemonDisplayName(student.pet)}!`
       };
     }
 
@@ -1600,18 +1754,14 @@ const App: React.FC = () => {
   };
 
   const updateActivePetInCollection = (student: Student, nextPet: PokemonPet) => {
-    if (!student.pet) return student.pets || [nextPet];
-    const currentPets = student.pets && student.pets.length > 0 ? student.pets : [student.pet];
-    return currentPets.map(p =>
-      p.dexId === student.pet!.dexId && p.name === student.pet!.name ? nextPet : p
-    );
+    return updatePetInCollection(student, nextPet);
   };
 
   const applyLuckyWheelReward = async (result: LuckyWheelResult) => {
     const reward = result.reward;
 
     if (reward.type === 'points') {
-      await handleUpdatePoints([result.student.id], reward.amount || 0, `🎡 Vòng quay may mắn: ${reward.label}`);
+      await handleUpdatePoints([result.student.id], reward.amount || 0, `🎡 Vòng quay may mắn: ${reward.label}`, 'lucky-wheel');
       setLuckyWheelResult(result);
       setIsLuckyWheelSpinning(false);
       return;
@@ -1635,7 +1785,7 @@ const App: React.FC = () => {
 
         if (reward.type === 'pokemon' && result.pokemon) {
           const currentPets = s.pets ? [...s.pets] : [];
-          if (s.pet && !currentPets.some(p => p.dexId === s.pet!.dexId && p.name === s.pet!.name)) {
+          if (s.pet && !currentPets.some(p => isSamePokemon(p, s.pet))) {
             currentPets.push(s.pet);
           }
           const updatedS: Student = {
@@ -1644,8 +1794,9 @@ const App: React.FC = () => {
             pets: [result.pokemon, ...currentPets],
             history: [historyItem, ...s.history].slice(0, 50)
           };
-          updatedTarget = updatedS;
-          return updatedS;
+          const discoveredS = markPokemonDiscovered(updatedS, result.pokemon);
+          updatedTarget = discoveredS;
+          return discoveredS;
         }
 
         if (reward.type === 'skill' && result.skill && s.pet) {
@@ -1811,29 +1962,65 @@ const App: React.FC = () => {
     let resultMsg = "";
     let winner: Student | null = null;
     let releaseEventToShow: PokemonReleaseEvent | null = null;
+    let battleProgressMessages: string[] = [];
+    let battleUiEvents: PokemonUiEvent[] = [];
+
+    const applyBattleOutcome = (
+      student: Student,
+      pointGain: number,
+      outcome: 'win' | 'loss' | 'draw',
+      hpDelta: number | null,
+      historyReason: string,
+      hpReason?: string
+    ): Student => {
+      const newPts = student.points + pointGain;
+      let baseStudent = normalizeStudentPokemonData(student);
+
+      if (hpDelta !== null) {
+        const hpUpdate = applyPetHpDelta(baseStudent, hpDelta, hpReason || historyReason);
+        baseStudent = hpUpdate.student;
+        if (hpUpdate.releaseEvent && !releaseEventToShow) releaseEventToShow = hpUpdate.releaseEvent;
+      }
+
+      const progressionResult = applyGameEventToStudent(
+        { ...baseStudent, points: newPts },
+        {
+          type: 'BATTLE_RESULT',
+          source: 'battle',
+          studentId: student.id,
+          battleOutcome: outcome,
+          battleScore: pointGain,
+          timestamp: Date.now()
+        }
+      );
+      battleUiEvents = [...battleUiEvents, ...progressionResult.uiEvents];
+
+      battleProgressMessages = [
+        ...battleProgressMessages,
+        ...progressionResult.uiEvents
+          .filter(event => ['streak', 'passive', 'charge-ready', 'level-up', 'evolution', 'random-drop', 'mastery'].includes(event.type))
+          .map(event => `${student.name}: ${event.message}`)
+      ];
+
+      return {
+        ...progressionResult.student,
+        points: newPts,
+        history: [
+          { id: Date.now().toString() + Math.random(), amount: pointGain, reason: historyReason, timestamp: Date.now() },
+          ...progressionResult.student.history
+        ].slice(0, 50)
+      };
+    };
 
     if (scoreA > scoreB) {
       winner = battleStudentA;
       // A wins: A gets +scoreA points, Pokemon gets +diff HP. B gets +scoreB points, Pokemon loses diff HP (-diff HP).
       updatedStudents = updatedStudents.map(s => {
         if (s.id === battleStudentA.id) {
-          const newPts = s.points + scoreA;
-          const hpUpdate = applyPetHpDelta(s, diff, `Battle thắng: hồi ${diff} HP`);
-          return {
-            ...hpUpdate.student,
-            points: newPts,
-            history: [{ id: Date.now().toString() + Math.random(), amount: scoreA, reason: `🏆 Thắng Battle: +${scoreA}đ (Pokemon +${diff} HP)`, timestamp: Date.now() }, ...hpUpdate.student.history]
-          };
+          return applyBattleOutcome(s, scoreA, 'win', diff, `🏆 Thắng Battle: +${scoreA}đ (Pokemon +${diff} HP)`, `Battle thắng: hồi ${diff} HP`);
         }
         if (s.id === battleStudentB.id) {
-          const newPts = s.points + scoreB;
-          const hpUpdate = applyPetHpDelta(s, -diff, `Battle thua: mất ${diff} HP`);
-          if (hpUpdate.releaseEvent && !releaseEventToShow) releaseEventToShow = hpUpdate.releaseEvent;
-          return {
-            ...hpUpdate.student,
-            points: newPts,
-            history: [{ id: Date.now().toString() + Math.random(), amount: scoreB, reason: `⚔️ Thua Battle: +${scoreB}đ (Pokemon -${diff} HP)`, timestamp: Date.now() }, ...hpUpdate.student.history]
-          };
+          return applyBattleOutcome(s, scoreB, 'loss', -diff, `⚔️ Thua Battle: +${scoreB}đ (Pokemon -${diff} HP)`, `Battle thua: mất ${diff} HP`);
         }
         return s;
       });
@@ -1844,23 +2031,10 @@ const App: React.FC = () => {
       // B wins: B gets +scoreB points, Pokemon gets +diff HP. A gets +scoreA points, Pokemon loses diff HP (-diff HP).
       updatedStudents = updatedStudents.map(s => {
         if (s.id === battleStudentB.id) {
-          const newPts = s.points + scoreB;
-          const hpUpdate = applyPetHpDelta(s, diff, `Battle thắng: hồi ${diff} HP`);
-          return {
-            ...hpUpdate.student,
-            points: newPts,
-            history: [{ id: Date.now().toString() + Math.random(), amount: scoreB, reason: `🏆 Thắng Battle: +${scoreB}đ (Pokemon +${diff} HP)`, timestamp: Date.now() }, ...hpUpdate.student.history]
-          };
+          return applyBattleOutcome(s, scoreB, 'win', diff, `🏆 Thắng Battle: +${scoreB}đ (Pokemon +${diff} HP)`, `Battle thắng: hồi ${diff} HP`);
         }
         if (s.id === battleStudentA.id) {
-          const newPts = s.points + scoreA;
-          const hpUpdate = applyPetHpDelta(s, -diff, `Battle thua: mất ${diff} HP`);
-          if (hpUpdate.releaseEvent && !releaseEventToShow) releaseEventToShow = hpUpdate.releaseEvent;
-          return {
-            ...hpUpdate.student,
-            points: newPts,
-            history: [{ id: Date.now().toString() + Math.random(), amount: scoreA, reason: `⚔️ Thua Battle: +${scoreA}đ (Pokemon -${diff} HP)`, timestamp: Date.now() }, ...hpUpdate.student.history]
-          };
+          return applyBattleOutcome(s, scoreA, 'loss', -diff, `⚔️ Thua Battle: +${scoreA}đ (Pokemon -${diff} HP)`, `Battle thua: mất ${diff} HP`);
         }
         return s;
       });
@@ -1870,20 +2044,10 @@ const App: React.FC = () => {
       // Tie
       updatedStudents = updatedStudents.map(s => {
         if (s.id === battleStudentA.id) {
-          const newPts = s.points + scoreA;
-          return {
-            ...s,
-            points: newPts,
-            history: [{ id: Date.now().toString() + Math.random(), amount: scoreA, reason: `⚔️ Hòa Battle: +${scoreA}đ`, timestamp: Date.now() }, ...s.history]
-          };
+          return applyBattleOutcome(s, scoreA, 'draw', null, `⚔️ Hòa Battle: +${scoreA}đ`);
         }
         if (s.id === battleStudentB.id) {
-          const newPts = s.points + scoreB;
-          return {
-            ...s,
-            points: newPts,
-            history: [{ id: Date.now().toString() + Math.random(), amount: scoreB, reason: `⚔️ Hòa Battle: +${scoreB}đ`, timestamp: Date.now() }, ...s.history]
-          };
+          return applyBattleOutcome(s, scoreB, 'draw', null, `⚔️ Hòa Battle: +${scoreB}đ`);
         }
         return s;
       });
@@ -1891,8 +2055,15 @@ const App: React.FC = () => {
       resultMsg = `🤝 TRẬN BATTLE HÒA NHAU!\n\nCả 2 học sĩ đều được cộng điểm và bảo toàn HP cho Pokemon.`;
     }
 
+    if (battleProgressMessages.length > 0) {
+      resultMsg += `\n\nTiến triển Pokémon:\n${battleProgressMessages.slice(0, 5).map(message => `• ${message}`).join('\n')}`;
+    }
+
     setStudents(updatedStudents);
     if (releaseEventToShow) setPokemonReleaseEvent(releaseEventToShow);
+    if (!releaseEventToShow && battleUiEvents.length > 0) {
+      showPokemonReaction(battleUiEvents, 'Kết quả Battle Pokémon');
+    }
     new Audio(posSoundUrl).play().catch(() => {});
 
     const updatedA = updatedStudents.find(s => s.id === battleStudentA.id) || battleStudentA;
@@ -1945,7 +2116,7 @@ const App: React.FC = () => {
 
   const getFusionCandidates = (student: Student): PokemonPet[] => {
     const candidates = [...(student.pets || [])];
-    if (student.pet && !candidates.some(p => p.dexId === student.pet?.dexId && p.name === student.pet?.name)) {
+    if (student.pet && !candidates.some(p => isSamePokemon(p, student.pet))) {
       candidates.unshift(student.pet);
     }
     return candidates;
@@ -1989,31 +2160,37 @@ const App: React.FC = () => {
     });
     const combinedSkills = Object.keys(combinedSkillUses);
     const randomNewPokemon = getRandomPokemon();
+    const fusedLevel = Math.min(30, Math.max(1, Math.floor(petsToFuse.reduce((sum, pet) => sum + (pet.level || 1), 0) / petsToFuse.length)));
+    const fusedIsShiny = petsToFuse.every(pet => pet.isShiny);
 
     const fusedPet: PokemonPet = {
-      dexId: randomNewPokemon.dexId,
-      name: `Hợp Thể ${randomNewPokemon.name}`,
+      ...createPokemonPetFromDexId(randomNewPokemon.dexId, `Hợp Thể ${randomNewPokemon.name}`, { isShiny: fusedIsShiny }),
       types: Array.from(new Set(petsToFuse.flatMap(p => p.types))),
-      accessories: [],
+      level: fusedLevel,
+      xp: 0,
+      totalXp: totalXpForLevel(fusedLevel),
+      bond: 0,
+      charge: 0,
+      masteryXp: 0,
+      masteryStars: 0,
       skills: combinedSkills,
-      skillUses: combinedSkillUses,
-      baseDexId: randomNewPokemon.dexId
+      skillUses: combinedSkillUses
     };
 
     const updatedPets = [fusedPet, ...remainingPets];
 
-    const updatedS: Student = {
+    const updatedS: Student = markPokemonDiscovered({
       ...s,
       pet: fusedPet,
       pets: updatedPets
-    };
+    }, fusedPet);
 
     setStudents(prev => prev.map(x => x.id === studentId ? updatedS : x));
     setEditingStudent(updatedS);
     setSelectedFusionPetDexIds([]);
     setProfileTab('pet');
     new Audio(posSoundUrl).play().catch(() => {});
-    alert(`🔮 HỢP NHẤT THÀNH CÔNG!\n\nĐã dung hợp các Pokémon để tái sinh linh thú [${fusedPet.name}] tích tụ ${combinedSkills.length} tuyệt chiêu thần bí!`);
+    alert(`🔮 HỢP NHẤT THÀNH CÔNG!\n\nĐã dung hợp các Pokémon để tái sinh linh thú [${getPokemonDisplayName(fusedPet)}] tích tụ ${combinedSkills.length} tuyệt chiêu thần bí!`);
   };
 
   const playDiceSound = () => {
@@ -2517,8 +2694,14 @@ const App: React.FC = () => {
     );
   }
 
+  const releaseStudent = pokemonReleaseEvent ? students.find(s => s.id === pokemonReleaseEvent.studentId) : undefined;
+  const releaseEggCost = 10;
+  const releaseEggShortfall = Math.max(0, releaseEggCost - (releaseStudent?.points || 0));
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_50%_0%,#fffbf2_0%,#f5ebe0_100%)] pb-32">
+      <PokemonReactionToast events={pokemonReactionEvents} title={pokemonReactionTitle} />
+
       {/* NAVIGATION BAR */}
       <div className="fixed top-0 left-0 right-0 z-40 h-5 group/nav">
         <nav className="absolute top-0 left-0 right-0 p-3 sm:p-4 backdrop-blur-xl bg-gradient-to-r from-red-950/95 via-red-900/95 to-amber-950/95 border-b-2 border-amber-400/50 shadow-[0_10px_30px_rgba(0,0,0,0.3)] -translate-y-full group-hover/nav:translate-y-0 focus-within:translate-y-0 transition-transform duration-300 ease-out">
@@ -2679,6 +2862,13 @@ const App: React.FC = () => {
             <div className="flex flex-wrap gap-4 mb-8 bg-gray-50 p-4 rounded-2xl border items-center">
               <input type="text" placeholder="Tìm kiếm học sĩ..." className="flex-1 p-3 rounded-xl border outline-none focus:ring-2 ring-red-800/20" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
               
+              <button
+                onClick={openHomeworkCheck}
+                className="bg-emerald-700 text-white px-5 py-3 rounded-xl font-black shadow-lg hover:bg-emerald-800 transition-all uppercase text-xs tracking-wider"
+              >
+                📚 Check Homework
+              </button>
+
               <button onClick={() => {
                 const name = prompt("Họ tên học sĩ:");
                 if (!name) return;
@@ -2722,8 +2912,8 @@ const App: React.FC = () => {
                     <button onClick={(e) => { e.stopPropagation(); toggleAttendance(s.id); }} className="bg-white/95 p-2 rounded-lg border shadow-sm text-[10px] font-bold">VẮNG/CÓ</button>
                   </div>
                   <div className="absolute bottom-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                    <button onClick={(e) => { e.stopPropagation(); setSelectedStudentIds([s.id]); setActiveTab('positive'); setShowSkillModal(true); }} className="bg-green-500 text-white w-10 h-10 rounded-full shadow-lg font-bold text-xl">+</button>
-                    <button onClick={(e) => { e.stopPropagation(); setSelectedStudentIds([s.id]); setActiveTab('negative'); setShowSkillModal(true); }} className="bg-red-500 text-white w-10 h-10 rounded-full shadow-lg font-bold text-xl">-</button>
+                    <button onClick={(e) => { e.stopPropagation(); setSelectedStudentIds([s.id]); setActiveTab('positive'); setFeedbackSource('manual'); setShowSkillModal(true); }} className="bg-green-500 text-white w-10 h-10 rounded-full shadow-lg font-bold text-xl">+</button>
+                    <button onClick={(e) => { e.stopPropagation(); setSelectedStudentIds([s.id]); setActiveTab('negative'); setFeedbackSource('manual'); setShowSkillModal(true); }} className="bg-red-500 text-white w-10 h-10 rounded-full shadow-lg font-bold text-xl">-</button>
                   </div>
                 </div>
               ))}
@@ -2744,7 +2934,7 @@ const App: React.FC = () => {
               isSyncing={isSyncing}
               onBackup={handleBackupToCloud}
               onRestore={handleRestoreFromCloud}
-              onOpenFeedback={() => setShowSkillModal(true)}
+              onOpenFeedback={() => { setFeedbackSource('manual'); setShowSkillModal(true); }}
               onDeleteSelected={handleDeleteStudents}
             />
           </div>
@@ -2842,6 +3032,7 @@ const App: React.FC = () => {
                   }} className="flex-1 bg-green-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-green-700 hover:scale-[1.01] transition-all">Lưu Thông Tin</button>
                   <button onClick={() => { 
                     setSelectedStudentIds([editingStudent.id]); 
+                    setFeedbackSource('manual');
                     setShowSkillModal(true); 
                   }} className="flex-1 bg-red-800 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-red-900 hover:scale-[1.01] transition-all">Ban Thưởng / Phạt</button>
                   <button onClick={() => {
@@ -2917,30 +3108,20 @@ const App: React.FC = () => {
 
                               if (isHatching && updatedEgg.status === 'egg') {
                                 updatedEgg.status = 'hatched';
-                                const meta = LIST_POKEMONS.find(p => p.dexId === currentEgg.assignedDexId) || LIST_POKEMONS[0];
-                                
-                                const originalBaseId = meta.dexId;
-                                const evolved = getEvolvedForm(originalBaseId, editingStudent.points + 1);
-                                
-                                updatedPet = {
-                                  dexId: evolved.dexId,
-                                  name: evolved.name,
-                                  types: evolved.types,
-                                  accessories: [],
-                                  skills: [],
-                                  baseDexId: originalBaseId
-                                };
-                                setHatchSuccessMessage(`Tuyệt diệu! Quả trứng của học sĩ ${editingStudent.name} đã chính thức nở ra Pokémon cưng ${evolved.name}! 🎉`);
+                                updatedPet = createPokemonPetFromDexId(currentEgg.assignedDexId);
+                                setHatchSuccessMessage(`Tuyệt diệu! Quả trứng của học sĩ ${editingStudent.name} đã chính thức nở ra Pokémon cưng ${getPokemonDisplayName(updatedPet)}! 🎉`);
                                 setShowHatchModal(true);
                               }
 
-                              const currentMerged: Student = {
+                              let currentMerged: Student = {
                                 ...editingStudent,
                                 points: editingStudent.points + 1,
                                 egg: updatedEgg,
                                 pet: updatedPet,
+                                pets: updatedPet ? updatePetInCollection(editingStudent, updatedPet) : editingStudent.pets,
                                 history: [historyItem, ...editingStudent.history].slice(0, 50)
                               };
+                              if (updatedPet && isHatching) currentMerged = markPokemonDiscovered(currentMerged, updatedPet);
 
                               setEditingStudent(currentMerged);
                               setStudents(prev => prev.map(s => s.id === editingStudent.id ? currentMerged : s));
@@ -2961,30 +3142,19 @@ const App: React.FC = () => {
                              <button 
                                onClick={() => {
                                  const currentEgg = editingStudent.egg!;
-                                 const meta = LIST_POKEMONS.find(p => p.dexId === currentEgg.assignedDexId) || LIST_POKEMONS[0];
                                  const updatedEgg = { ...currentEgg, status: 'hatched' as const, progress: 10 };
+                                 const updatedPet = createPokemonPetFromDexId(currentEgg.assignedDexId);
                                  
-                                 const originalBaseId = meta.dexId;
-                                 const evolved = getEvolvedForm(originalBaseId, editingStudent.points);
-                                 
-                                 const updatedPet = {
-                                   dexId: evolved.dexId,
-                                   name: evolved.name,
-                                   types: evolved.types,
-                                   accessories: [],
-                                   skills: [],
-                                   baseDexId: originalBaseId
-                                  };
-                                 
-                                 const currentMerged: Student = {
+                                 const currentMerged: Student = markPokemonDiscovered({
                                    ...editingStudent,
                                    egg: updatedEgg,
-                                   pet: updatedPet
-                                 };
+                                   pet: updatedPet,
+                                   pets: updatePetInCollection(editingStudent, updatedPet)
+                                 }, updatedPet);
 
                                  setEditingStudent(currentMerged);
                                  setStudents(prev => prev.map(s => s.id === editingStudent.id ? currentMerged : s));
-                                 setHatchSuccessMessage(`Tin vui chấn động! Pokémon ${evolved.name} đã tung cánh bay ra từ vỏ trứng chào mừng học sĩ ${editingStudent.name}! 🐣💖`);
+                                 setHatchSuccessMessage(`Tin vui chấn động! Pokémon ${getPokemonDisplayName(updatedPet)} đã tung cánh bay ra từ vỏ trứng chào mừng học sĩ ${editingStudent.name}! 🐣💖`);
                                  setShowHatchModal(true);
                                }}
                                className="w-full bg-green-600 text-white font-bold py-4 rounded-2xl shadow-xl hover:bg-green-700 animate-bounce transition-all uppercase text-xs"
@@ -3008,15 +3178,19 @@ const App: React.FC = () => {
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[220px] overflow-y-auto pr-2 custom-scrollbar">
                           {editingStudent.pets.map(p => (
-                            <div key={p.dexId} className="p-3 bg-white border border-gray-100 rounded-2xl flex items-center justify-between gap-3 shadow-xs font-sans">
+                            <div key={p.instanceId || `${p.dexId}-${p.name}`} className="p-3 bg-white border border-gray-100 rounded-2xl flex items-center justify-between gap-3 shadow-xs font-sans">
                               <div className="flex items-center gap-2 min-w-0">
                                 <img 
-                                  src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.dexId}.png`} 
+                                  src={getPokemonArtworkUrl(p)}
+                                  onError={event => {
+                                    if (p.isShiny) event.currentTarget.src = getPokemonArtworkUrl(p, true);
+                                  }}
                                   className="w-10 h-10 object-contain shrink-0" 
                                 />
                                 <div className="min-w-0">
-                                  <h5 className="font-extrabold text-xs text-gray-800 truncate">{p.name}</h5>
+                                  <h5 className="font-extrabold text-xs text-gray-800 truncate">{p.isShiny ? '✨ ' : ''}{getPokemonDisplayName(p)}</h5>
                                   <span className="text-[8px] bg-amber-100 text-amber-900 border border-amber-200 px-1.5 py-0.5 rounded font-black uppercase tracking-tight">{p.types.join('/')}</span>
+                                  <p className="mt-1 text-[9px] font-black text-gray-400">Lv.{p.level || 1} · HP {p.hp ?? 100} · Bond {p.bond || 0}</p>
                                 </div>
                               </div>
                               <button 
@@ -3030,6 +3204,7 @@ const App: React.FC = () => {
                         </div>
                       </div>
                     )}
+                    <PokemonPokedexPanel student={editingStudent} />
                   </div>
                 ) : (
                   /* PET CORNER DETAILED STORE & CUSTOMIZATION */
@@ -3039,9 +3214,12 @@ const App: React.FC = () => {
                         <div className="absolute inset-0 bg-radial-gradient from-amber-200/50 via-transparent to-transparent opacity-60 group-hover:scale-125 transition-transform" />
                         <img 
                           referrerPolicy="no-referrer"
-                          src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${editingStudent.pet.dexId}.png`}
-                          className="w-full h-full object-contain relative z-10 drop-shadow-xl animate-in duration-500 hover:rotate-6 transition-transform"
-                          alt={editingStudent.pet.name}
+                          src={getPokemonArtworkUrl(editingStudent.pet)}
+                          onError={event => {
+                            if (editingStudent.pet?.isShiny) event.currentTarget.src = getPokemonArtworkUrl(editingStudent.pet, true);
+                          }}
+                          className={`w-full h-full object-contain relative z-10 drop-shadow-xl animate-in duration-500 hover:rotate-6 transition-transform ${editingStudent.pet.isShiny ? 'rounded-2xl bg-amber-100/70 ring-4 ring-amber-300' : ''}`}
+                          alt={getPokemonDisplayName(editingStudent.pet)}
                         />
                         
                         {/* Type Badges on bottom corner */}
@@ -3058,7 +3236,15 @@ const App: React.FC = () => {
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-100 pb-3">
                           <div>
                             <span className="bg-amber-100 text-amber-900 font-black text-[9px] px-2.5 py-0.5 rounded-full uppercase tracking-wider block w-max">Linh Thú Hộ Mệnh Đương Trực</span>
-                            <h3 className="text-2xl font-black text-amber-950 mt-1">{editingStudent.pet.name}</h3>
+                            <h3 className="text-2xl font-black text-amber-950 mt-1">{getPokemonDisplayName(editingStudent.pet)}</h3>
+                            <p className="text-xs font-bold text-amber-900/60">
+                              {editingStudent.pet.speciesName || editingStudent.pet.name} · Lv.{editingStudent.pet.level || 1}
+                            </p>
+                            {editingStudent.pet.isShiny && (
+                              <span className="mt-1 inline-flex w-max items-center rounded-full border border-amber-300 bg-amber-100 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-amber-800">
+                                ✨ Shiny
+                              </span>
+                            )}
                           </div>
                           
                           <div className="text-right sm:text-right">
@@ -3072,11 +3258,66 @@ const App: React.FC = () => {
                           <label className="text-[10px] uppercase font-bold text-gray-400 block mb-1">Đặt Biệt Danh Thú Cưng</label>
                           <input 
                             className="w-full border p-2.5 rounded-xl bg-white focus:ring-2 ring-amber-500/30 outline-none text-sm font-bold text-amber-950 border-amber-200" 
-                            value={editingStudent.pet.name} 
+                            value={editingStudent.pet.nickname || ''} 
                             onChange={e => handleRenamePet(editingStudent.id, e.target.value)}
                             placeholder="Biệt danh mới cho pet..."
                           />
                         </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 font-sans">
+                          <div className="bg-white border border-amber-100 rounded-2xl p-3">
+                            <p className="text-[9px] uppercase font-black text-gray-400">Level</p>
+                            <p className="text-sm font-black text-amber-950">Lv.{editingStudent.pet.level || 1}</p>
+                          </div>
+                          <div className="bg-white border border-amber-100 rounded-2xl p-3">
+                            <p className="text-[9px] uppercase font-black text-gray-400">HP</p>
+                            <p className="text-sm font-black text-emerald-700">{editingStudent.pet.hp ?? 100}/100</p>
+                          </div>
+                          <div className="bg-white border border-amber-100 rounded-2xl p-3">
+                            <p className="text-[9px] uppercase font-black text-gray-400">{(editingStudent.pet.level || 1) >= 30 ? 'Mastery XP' : 'XP'}</p>
+                            <p className="text-sm font-black text-amber-950">
+                              {(editingStudent.pet.level || 1) >= 30
+                                ? `${editingStudent.pet.masteryXp || 0}/${getNextMasteryTarget(editingStudent.pet.masteryStars || 0) || 'MAX'}`
+                                : `${editingStudent.pet.xp || 0}/${xpNeededForNextLevel(editingStudent.pet.level || 1)}`}
+                            </p>
+                          </div>
+                          <div className="bg-white border border-amber-100 rounded-2xl p-3">
+                            <p className="text-[9px] uppercase font-black text-gray-400">Bond</p>
+                            <p className="text-sm font-black text-pink-700">{editingStudent.pet.bond || 0}/100</p>
+                          </div>
+                          <div className="bg-white border border-amber-100 rounded-2xl p-3">
+                            <p className="text-[9px] uppercase font-black text-gray-400">Charge</p>
+                            <p className="text-sm font-black text-indigo-700">{editingStudent.pet.charge || 0}/5</p>
+                          </div>
+                          <div className="bg-white border border-amber-100 rounded-2xl p-3 min-w-0">
+                            <p className="text-[9px] uppercase font-black text-gray-400">Passive</p>
+                            <div className="mt-1 min-w-0">
+                              <PokemonPassiveBadge passiveId={editingStudent.pet.passiveId} compact className="max-w-full" />
+                              {!editingStudent.pet.passiveId && <span className="text-[10px] font-black text-gray-400">Chưa có</span>}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-amber-200 bg-white p-3 font-sans">
+                          <p className="text-[9px] uppercase font-black text-gray-400">Evolution Preview</p>
+                          <p className="text-sm font-black text-amber-950">
+                            {editingPetEvolutionPreview.isFinal
+                              ? 'Final Evolution Reached'
+                              : `Next Evolution: Lv. ${editingPetEvolutionPreview.nextLevel} · ${editingPetEvolutionPreview.nextSpeciesName}`}
+                          </p>
+                        </div>
+
+                        {(editingStudent.pet.level || 1) >= 30 && (
+                          <div className="rounded-2xl border border-amber-200 bg-white p-3 font-sans">
+                            <p className="text-[9px] uppercase font-black text-gray-400">Mastery</p>
+                            <p className="text-xl font-black text-amber-700 tracking-widest">
+                              {(editingStudent.pet.masteryStars || 0) > 0 ? '⭐'.repeat(editingStudent.pet.masteryStars || 0) : 'Chưa có sao'}
+                            </p>
+                            <p className="mt-1 text-[10px] font-bold text-amber-900/60">
+                              XP sau Lv.30 sẽ chuyển thành Mastery XP cho danh hiệu đồng hành lâu dài.
+                            </p>
+                          </div>
+                        )}
 
                         <div className="flex justify-end pt-1">
                           <button 
@@ -3102,17 +3343,21 @@ const App: React.FC = () => {
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[190px] overflow-y-auto pr-2 custom-scrollbar font-sans">
                           {editingStudent.pets.map(p => {
-                            const isActive = editingStudent.pet?.dexId === p.dexId;
+                            const isActive = isSamePokemon(editingStudent.pet, p);
                             return (
-                              <div key={p.dexId} className={`p-3 bg-white border rounded-2xl flex items-center justify-between gap-3 shadow-xs transition-all ${isActive ? 'border-amber-400 ring-2 ring-amber-100' : 'border-gray-100'}`}>
+                              <div key={p.instanceId || `${p.dexId}-${p.name}`} className={`p-3 bg-white border rounded-2xl flex items-center justify-between gap-3 shadow-xs transition-all ${isActive ? 'border-amber-400 ring-2 ring-amber-100' : 'border-gray-100'}`}>
                                 <div className="flex items-center gap-2 min-w-0">
                                   <img 
-                                    src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.dexId}.png`} 
+                                    src={getPokemonArtworkUrl(p)}
+                                    onError={event => {
+                                      if (p.isShiny) event.currentTarget.src = getPokemonArtworkUrl(p, true);
+                                    }}
                                     className="w-10 h-10 object-contain shrink-0" 
                                   />
                                   <div className="min-w-0">
-                                    <h5 className="font-extrabold text-xs text-gray-800 truncate">{p.name}</h5>
+                                    <h5 className="font-extrabold text-xs text-gray-800 truncate">{p.isShiny ? '✨ ' : ''}{getPokemonDisplayName(p)}</h5>
                                     <span className="text-[8px] bg-amber-100 text-amber-900 border border-amber-200 px-1.5 py-0.5 rounded font-black uppercase tracking-tight">{p.types.join('/')}</span>
+                                    <p className="mt-1 text-[9px] font-black text-gray-400">Lv.{p.level || 1} · HP {p.hp ?? 100} · Bond {p.bond || 0}</p>
                                   </div>
                                 </div>
                                 {isActive ? (
@@ -3132,6 +3377,7 @@ const App: React.FC = () => {
 
                       </div>
                     )}
+                    <PokemonPokedexPanel student={editingStudent} />
 
                     {/* SECTION: YOUR NEW DIRECT PET ACTIVE SKILLS (LIMIT 2 USES) */}
                     {editingStudent.pet.skills && editingStudent.pet.skills.length > 0 && (
@@ -3259,10 +3505,16 @@ const App: React.FC = () => {
                               }}
                               className={`text-left bg-white p-4 rounded-3xl border-2 transition-all flex items-center gap-4 ${isSelected ? 'border-purple-700 ring-4 ring-purple-100 shadow-lg' : 'border-purple-100 hover:border-purple-300'}`}
                             >
-                              <img src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.dexId}.png`} className="w-16 h-16 object-contain shrink-0" />
+                              <img
+                                src={getPokemonArtworkUrl(p)}
+                                onError={event => {
+                                  if (p.isShiny) event.currentTarget.src = getPokemonArtworkUrl(p, true);
+                                }}
+                                className="w-16 h-16 object-contain shrink-0"
+                              />
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
-                                  <h4 className="font-black text-sm text-purple-950 truncate">{p.name}</h4>
+                                  <h4 className="font-black text-sm text-purple-950 truncate">{p.isShiny ? '✨ ' : ''}{getPokemonDisplayName(p)}</h4>
                                   {isSelected && <span className="text-[9px] bg-purple-700 text-white px-2 py-0.5 rounded-full font-black">CHỌN</span>}
                                 </div>
                                 <p className="text-[9px] font-black text-purple-600 uppercase mt-1">{p.types.join(' / ')}</p>
@@ -3608,11 +3860,14 @@ const App: React.FC = () => {
                         </div>
                         <img 
                           referrerPolicy="no-referrer"
-                          src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${sidebarData.student.pet.dexId}.png`}
+                          src={getPokemonArtworkUrl(sidebarData.student.pet)}
+                          onError={event => {
+                            if (sidebarData.student.pet?.isShiny) event.currentTarget.src = getPokemonArtworkUrl(sidebarData.student.pet, true);
+                          }}
                           className="w-20 h-20 object-contain drop-shadow"
-                          alt={sidebarData.student.pet.name}
+                          alt={getPokemonDisplayName(sidebarData.student.pet)}
                         />
-                        <span className="text-[9px] font-black text-amber-900 truncate max-w-[80px]">{sidebarData.student.pet.name}</span>
+                        <span className="text-[9px] font-black text-amber-900 truncate max-w-[80px]">{getPokemonDisplayName(sidebarData.student.pet)}</span>
                         <div className="w-full bg-gray-200 h-1.5 rounded-full overflow-hidden mt-1">
                           <div 
                             className={`h-full rounded-full transition-all duration-300 ${(sidebarData.student.pet.hp ?? 100) > 50 ? 'bg-emerald-500' : (sidebarData.student.pet.hp ?? 100) > 20 ? 'bg-amber-500' : 'bg-red-500'}`}
@@ -3661,14 +3916,14 @@ const App: React.FC = () => {
                       onChange={e => setManualPoints(e.target.value)}
                     />
                     <button 
-                      onClick={() => handleUpdatePoints(selectedStudentIds, parseInt(manualPoints), "Điều chỉnh thủ công")}
+                      onClick={() => handleUpdatePoints(selectedStudentIds, parseInt(manualPoints), "Điều chỉnh thủ công", feedbackSource)}
                       className="bg-purple-600 text-white text-[10px] px-4 py-2 rounded-full font-bold hover:bg-purple-700 transition-all uppercase"
                     >
                       Lưu điểm
                     </button>
                   </div>
                 </div>
-                <button onClick={() => setShowSkillModal(false)} className="ml-4 text-4xl text-gray-300 hover:text-red-800 transition-colors">&times;</button>
+                <button onClick={() => { setFeedbackSource('manual'); setShowSkillModal(false); }} className="ml-4 text-4xl text-gray-300 hover:text-red-800 transition-colors">&times;</button>
               </div>
 
               <div className="flex border-b px-6 bg-white shrink-0 overflow-x-auto">
@@ -3681,7 +3936,7 @@ const App: React.FC = () => {
                   {skills.filter(s => s.type === (activeTab === 'positive' ? 'positive' : 'negative')).map(sk => (
                     <button 
                       key={sk.id} 
-                      onClick={() => handleUpdatePoints(selectedStudentIds, sk.points, sk.name)} 
+                      onClick={() => handleUpdatePoints(selectedStudentIds, sk.points, sk.name, feedbackSource)} 
                       className="flex flex-col items-center justify-center gap-3 p-6 rounded-3xl border-2 border-gray-100 hover:border-purple-200 hover:bg-purple-50 transition-all group relative aspect-square"
                     >
                       <div className="text-5xl group-hover:scale-125 transition-transform duration-300">{sk.icon}</div>
@@ -3748,26 +4003,12 @@ const App: React.FC = () => {
                     </div>
                   </div>
 
-                  {randomStudent.pet && (
-                    <div className="flex flex-col items-center bg-amber-50 p-3 rounded-3xl border border-amber-200 shadow-md relative">
-                      <div className="absolute -top-2 -right-2 bg-emerald-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full border border-white shadow">
-                        ❤️ {randomStudent.pet.hp ?? 100}/100
-                      </div>
-                      <img 
-                        referrerPolicy="no-referrer"
-                        src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${randomStudent.pet.dexId}.png`}
-                        className="w-20 h-20 sm:w-24 sm:h-24 object-contain drop-shadow"
-                        alt={randomStudent.pet.name}
-                      />
-                      <span className="text-xs font-black text-amber-950 truncate max-w-[100px] mt-1">{randomStudent.pet.name}</span>
-                      <div className="w-full bg-gray-200 h-1.5 rounded-full overflow-hidden mt-1">
-                        <div 
-                          className={`h-full rounded-full ${(randomStudent.pet.hp ?? 100) > 50 ? 'bg-emerald-500' : (randomStudent.pet.hp ?? 100) > 20 ? 'bg-amber-500' : 'bg-red-500'}`}
-                          style={{ width: `${Math.min(100, Math.max(0, randomStudent.pet.hp ?? 100))}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
+                  <PokemonMiniStatus
+                    pet={randomStudent.pet}
+                    progress={randomStudent.pokemonProgress}
+                    tone="amber"
+                    className="w-64 max-w-[58vw]"
+                  />
                 </div>
 
                 <div className="mb-6">
@@ -3814,7 +4055,7 @@ const App: React.FC = () => {
 
                 <div className="flex flex-col sm:flex-row gap-3">
                   <button 
-                    onClick={() => { setShowRandomModal(false); setShowSkillModal(true); }} 
+                    onClick={() => { setFeedbackSource('solo'); setShowSkillModal(true); }} 
                     className="flex-1 bg-red-800 text-white py-3.5 rounded-2xl font-bold text-sm shadow-lg hover:bg-red-900 uppercase tracking-wider"
                   >
                     Ban Thưởng / Phạt
@@ -3910,21 +4151,15 @@ const App: React.FC = () => {
                         <h4 className="font-extrabold text-gray-800 text-base">{battleStudentA.name}</h4>
                         <p className="text-[10px] text-gray-500 font-bold mb-2">Hào quang: {battleStudentA.points}đ</p>
 
-                        {battleStudentA.pet ? (
-                          <div className="bg-white p-2 rounded-2xl border border-amber-200 w-full flex items-center gap-2 mb-3">
-                            <img 
-                              referrerPolicy="no-referrer"
-                              src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${battleStudentA.pet.dexId}.png`}
-                              className="w-10 h-10 object-contain shrink-0"
-                            />
-                            <div className="flex-1 min-w-0 text-left">
-                              <p className="text-[10px] font-black text-amber-900 truncate">{battleStudentA.pet.name}</p>
-                              <p className="text-[9px] font-bold text-emerald-600">❤️ HP: {battleStudentA.pet.hp ?? 100}/100</p>
-                            </div>
-                          </div>
-                        ) : (
-                          <p className="text-[9px] text-gray-400 italic mb-3">Chưa có Linh thú</p>
-                        )}
+                        <PokemonMiniStatus
+                          pet={battleStudentA.pet}
+                          progress={battleStudentA.pokemonProgress}
+                          tone="amber"
+                          showImage
+                          streakLabel="Battle"
+                          streakValue={battleStudentA.pokemonProgress?.battleWinStreak || 0}
+                          className="mb-3 w-full"
+                        />
 
                         <div className="w-full">
                           <p className="text-[10px] font-black uppercase text-amber-800 mb-1">Điểm Battle Vòng Này:</p>
@@ -3960,21 +4195,15 @@ const App: React.FC = () => {
                         <h4 className="font-extrabold text-gray-800 text-base">{battleStudentB.name}</h4>
                         <p className="text-[10px] text-gray-500 font-bold mb-2">Hào quang: {battleStudentB.points}đ</p>
 
-                        {battleStudentB.pet ? (
-                          <div className="bg-white p-2 rounded-2xl border border-purple-200 w-full flex items-center gap-2 mb-3">
-                            <img 
-                              referrerPolicy="no-referrer"
-                              src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${battleStudentB.pet.dexId}.png`}
-                              className="w-10 h-10 object-contain shrink-0"
-                            />
-                            <div className="flex-1 min-w-0 text-left">
-                              <p className="text-[10px] font-black text-purple-900 truncate">{battleStudentB.pet.name}</p>
-                              <p className="text-[9px] font-bold text-emerald-600">❤️ HP: {battleStudentB.pet.hp ?? 100}/100</p>
-                            </div>
-                          </div>
-                        ) : (
-                          <p className="text-[9px] text-gray-400 italic mb-3">Chưa có Linh thú</p>
-                        )}
+                        <PokemonMiniStatus
+                          pet={battleStudentB.pet}
+                          progress={battleStudentB.pokemonProgress}
+                          tone="purple"
+                          showImage
+                          streakLabel="Battle"
+                          streakValue={battleStudentB.pokemonProgress?.battleWinStreak || 0}
+                          className="mb-3 w-full"
+                        />
 
                         <div className="w-full">
                           <p className="text-[10px] font-black uppercase text-purple-800 mb-1">Điểm Battle Vòng Này:</p>
@@ -4168,10 +4397,18 @@ const App: React.FC = () => {
                         {luckyWheelResult.pokemon && (
                           <img
                             referrerPolicy="no-referrer"
-                            src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${luckyWheelResult.pokemon.dexId}.png`}
-                            className="w-28 h-28 object-contain mx-auto mt-3 drop-shadow"
-                            alt={luckyWheelResult.pokemon.name}
+                            src={getPokemonArtworkUrl(luckyWheelResult.pokemon)}
+                            onError={event => {
+                              if (luckyWheelResult.pokemon?.isShiny) event.currentTarget.src = getPokemonArtworkUrl(luckyWheelResult.pokemon, true);
+                            }}
+                            className={`w-28 h-28 object-contain mx-auto mt-3 drop-shadow ${luckyWheelResult.pokemon.isShiny ? 'rounded-3xl bg-amber-100 ring-4 ring-amber-300' : ''}`}
+                            alt={getPokemonDisplayName(luckyWheelResult.pokemon)}
                           />
+                        )}
+                        {luckyWheelResult.pokemon?.isShiny && (
+                          <span className="mt-2 inline-flex rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-amber-800">
+                            ✨ Shiny
+                          </span>
                         )}
 
                         {luckyWheelResult.skill && (
@@ -4569,57 +4806,106 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {showHomeworkModal && (
+        <HomeworkCheckModal
+          students={presentStudents}
+          statuses={homeworkStatuses}
+          lessonDateKey={homeworkLessonDateKey}
+          getRank={getRank}
+          onToggle={toggleHomeworkStatus}
+          onConfirm={handleConfirmHomeworkCheck}
+          onClose={() => setShowHomeworkModal(false)}
+        />
+      )}
+
       {/* MODAL: POKEMON RELEASED WHEN HP REACHES 0 */}
       {pokemonReleaseEvent && (
         <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/92 p-4 backdrop-blur-xl animate-in fade-in duration-300">
-          <div className="bg-emerald-50 max-w-2xl w-full rounded-[42px] border-[10px] border-emerald-700 p-6 sm:p-8 shadow-[0_0_90px_rgba(16,185,129,0.45)] text-center space-y-6 relative overflow-hidden">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(34,197,94,0.22),transparent_36%)] pointer-events-none" />
+          <div className="bg-rose-50 max-w-2xl w-full rounded-[36px] border-[8px] border-rose-700 p-6 sm:p-8 shadow-[0_0_90px_rgba(190,18,60,0.38)] text-center space-y-6 relative overflow-hidden">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(244,63,94,0.18),transparent_36%)] pointer-events-none" />
             <div className="relative z-10 space-y-4">
-              <p className="text-[10px] font-black uppercase tracking-[0.25em] text-emerald-800">Linh thú rời đội hình</p>
-              <h3 className="text-3xl sm:text-4xl font-royal text-emerald-950 uppercase">Đã thả về rừng</h3>
+              <p className="text-[10px] font-black uppercase tracking-[0.25em] text-rose-800">Linh thú rời đội hình</p>
+              <h3 className="text-3xl sm:text-4xl font-royal text-rose-950 uppercase">Pokémon đã rời đội hình</h3>
 
-              <div className="bg-white/85 rounded-[32px] border border-emerald-200 p-5 shadow-inner">
+              <div className="bg-white/90 rounded-[28px] border border-rose-200 p-5 shadow-inner">
                 <img
                   referrerPolicy="no-referrer"
-                  src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pokemonReleaseEvent.releasedPet.dexId}.png`}
-                  className="w-36 h-36 object-contain mx-auto drop-shadow-xl grayscale-[20%]"
-                  alt={pokemonReleaseEvent.releasedPet.name}
+                  src={getPokemonArtworkUrl(pokemonReleaseEvent.releasedPet)}
+                  onError={event => {
+                    if (pokemonReleaseEvent.releasedPet.isShiny) event.currentTarget.src = getPokemonArtworkUrl(pokemonReleaseEvent.releasedPet, true);
+                  }}
+                  className={`w-36 h-36 object-contain mx-auto drop-shadow-xl grayscale-[20%] ${pokemonReleaseEvent.releasedPet.isShiny ? 'rounded-3xl bg-amber-100 ring-4 ring-amber-300' : ''}`}
+                  alt={getPokemonDisplayName(pokemonReleaseEvent.releasedPet)}
                 />
-                <p className="text-lg font-black text-emerald-950">
-                  {pokemonReleaseEvent.releasedPet.name} của {pokemonReleaseEvent.studentName} đã hết HP nên được thả về rừng để hồi phục tự nhiên.
+                <p className="text-lg font-black text-rose-950">
+                  {pokemonReleaseEvent.releasedPet.isShiny ? '✨ ' : ''}{getPokemonDisplayName(pokemonReleaseEvent.releasedPet)} của {pokemonReleaseEvent.studentName} đã cạn HP và rời đội hình.
                 </p>
+                {pokemonReleaseEvent.cause && (
+                  <p className="mt-2 text-xs font-bold text-rose-700">{pokemonReleaseEvent.cause}</p>
+                )}
               </div>
 
               {pokemonReleaseEvent.remainingPets.length > 0 ? (
                 <div className="space-y-3">
-                  <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-800">Chọn Pokémon đồng hành tiếp theo</p>
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-rose-800">Chọn Pokémon đồng hành mới</p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {pokemonReleaseEvent.remainingPets.map(pet => (
                       <button
-                        key={`${pet.dexId}-${pet.name}-${pet.baseDexId || pet.dexId}`}
+                        key={pet.instanceId || `${pet.dexId}-${pet.name}-${pet.baseDexId || pet.dexId}`}
                         onClick={() => handleSelectReplacementPokemon(pet)}
-                        className="bg-white hover:bg-emerald-50 border-2 border-emerald-200 hover:border-emerald-600 rounded-3xl p-3 transition-all shadow-sm"
+                        className="bg-white hover:bg-rose-50 border-2 border-rose-200 hover:border-rose-600 rounded-3xl p-3 transition-all shadow-sm"
                       >
                         <img
                           referrerPolicy="no-referrer"
-                          src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pet.dexId}.png`}
+                          src={getPokemonArtworkUrl(pet)}
+                          onError={event => {
+                            if (pet.isShiny) event.currentTarget.src = getPokemonArtworkUrl(pet, true);
+                          }}
                           className="w-20 h-20 object-contain mx-auto"
-                          alt={pet.name}
+                          alt={getPokemonDisplayName(pet)}
                         />
-                        <p className="text-xs font-black text-emerald-950 truncate">{pet.name}</p>
-                        <p className="text-[10px] font-bold text-emerald-700">HP {pet.hp ?? 100}/100</p>
+                        <p className="text-xs font-black text-emerald-950 truncate">{pet.isShiny ? '✨ ' : ''}{getPokemonDisplayName(pet)}</p>
+                        <div className="mt-1 grid grid-cols-3 gap-1 text-[9px] font-black text-rose-800">
+                          <span className="rounded-lg bg-rose-50 px-1 py-0.5">Lv.{pet.level || 1}</span>
+                          <span className="rounded-lg bg-emerald-50 px-1 py-0.5 text-emerald-700">HP {pet.hp ?? 100}</span>
+                          <span className="rounded-lg bg-pink-50 px-1 py-0.5 text-pink-700">B{pet.bond || 0}</span>
+                        </div>
                       </button>
                     ))}
                   </div>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <p className="text-sm font-bold text-emerald-900">Học sinh này không còn Pokémon nào khác. Hãy mua trứng mới để tiếp tục ấp nở.</p>
+                  <p className="text-sm font-bold text-rose-900">Bạn không còn Pokémon nào trong bộ sưu tập.</p>
+                  {releaseEggShortfall > 0 && (
+                    <p className="rounded-2xl bg-white/85 p-3 text-xs font-black text-rose-700 border border-rose-200">
+                      Cần thêm {releaseEggShortfall} Hào Quang để mua trứng.
+                    </p>
+                  )}
                   <button
-                    onClick={handleOpenEggAfterRelease}
-                    className="bg-emerald-700 hover:bg-emerald-800 text-white px-8 py-3.5 rounded-2xl font-black uppercase tracking-wider shadow-lg transition-all"
+                    disabled={!releaseStudent || releaseEggShortfall > 0}
+                    onClick={() => {
+                      if (!releaseStudent) return;
+                      const bought = handleBuyNewEgg(releaseStudent.id);
+                      if (bought) setPokemonReleaseEvent(null);
+                    }}
+                    className="bg-rose-700 hover:bg-rose-800 disabled:bg-gray-300 disabled:text-gray-500 text-white px-8 py-3.5 rounded-2xl font-black uppercase tracking-wider shadow-lg transition-all"
                   >
-                    Mở màn mua trứng
+                    Mua trứng Pokémon mới — 10 Hào Quang
+                  </button>
+                  <div>
+                    <button
+                      onClick={handleOpenEggAfterRelease}
+                      className="text-xs font-black uppercase tracking-wider text-rose-700 hover:text-rose-950"
+                    >
+                      Mở hồ sơ ấp trứng
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => setPokemonReleaseEvent(null)}
+                    className="text-xs font-bold uppercase tracking-wider text-gray-500 hover:text-gray-800"
+                  >
+                    Tiếp tục học không có Pokémon
                   </button>
                 </div>
               )}

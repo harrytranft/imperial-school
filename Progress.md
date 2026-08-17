@@ -30,6 +30,50 @@
 - Added Lucky Wheel reward type for bonus Cá Ngựa dice rolls from 1 to 5.
 - Added Cá Ngựa bonus roll tracking so Lucky Wheel bonus rolls can be consumed without awarding the normal +1 answer point.
 - Added Lucky Wheel sound URLs and customizable rewards/penalties to Settings, local storage, JSON backup, and Supabase sync.
+- Started Pokémon Companion System 2.0 Phase 1:
+  - Added `instanceId`, species/nickname, Level, XP, Bond, Charge, Shiny/Mastery, passive, Pokedex, and student streak fields.
+  - Added automatic backward-compatible Pokémon normalization for Supabase load, guest localStorage load, and JSON import.
+  - Added `pokemonProgression.ts`, `pokemonPassives.ts`, and `gameEvents.ts` for pure progression/passive/event logic outside `App.tsx`.
+  - Switched new Pokémon creation and egg hatching to Level-based progression defaults instead of Hào Quang-based evolution.
+  - Added deterministic evolution variants based on Pokémon `instanceId`.
+  - Added Random Solo XP, Answer Streak, Bond, Charge, passive hooks, and Level-based evolution.
+  - Added Battle XP/Bond/Charge and Battle Win Streak while preserving existing Battle HP rules.
+  - Updated pet collection identity/selection to prefer `instanceId` and preserve nicknames through evolution.
+  - Added compact Level/XP/Bond/Charge display in Random Solo and student profile.
+- Verified production build with `npm run build` after Pokémon Companion System 2.0 Phase 1 changes.
+- Added Pokémon Companion System 2.0 Phase 2 UI:
+  - Added `PokemonMiniStatus`, `PokemonPassiveBadge`, and `PokemonReactionToast` components.
+  - Upgraded Random Solo status with Pokémon Level, HP, XP bar, Bond, Answer Streak, Charge, and Passive badge.
+  - Added non-blocking Pokémon reaction toast for Solo and Battle progression feedback.
+  - Upgraded Battle cards with Level/HP/XP/Bond/Battle Streak/Passive status while preserving Battle workflow.
+  - Upgraded release modal with cause text, Level/HP/Bond replacement cards, direct egg purchase when affordable, shortfall messaging when not affordable, and a continue-without-Pokémon escape path.
+- Verified production build with `npm run build` after Pokémon Companion System 2.0 Phase 2 changes.
+- Added Pokémon Companion System 2.0 Phase 3 Homework Check:
+  - Added compact `HomeworkCheckModal` for present students only, defaulting everyone to Done.
+  - Added a `Check Homework` class toolbar button.
+  - Added per-class lesson keys in the format `className:YYYY-MM-DD` to prevent double-checking the same student in one lesson.
+  - Done homework now increases Homework Streak, grants active Pokémon XP/Bond, applies x3/x5 streak bonus XP, and gives egg-only students +1 egg progress.
+  - Missing homework resets Homework Streak without changing Hào Quang or HP.
+  - Added non-blocking Homework Check reaction summary toast.
+- Verified production build with `npm run build` after Pokémon Companion System 2.0 Phase 3 changes.
+- Added Pokémon Companion System 2.0 Phase 4 Surprise Layer:
+  - Added Instant Random Drops after positive Solo and Battle events with score > 0.
+  - Drops auto-apply without teacher clicks: Rare Candy (+15 XP), Oran Berry (+10 HP), Friendship Ribbon (+3 Bond), and Energy Spark (+1 Charge).
+  - Gengar/Mischief passive now doubles Instant Drop chance from 6% to 12%.
+  - Drop events show through the non-blocking reaction toast and are prioritized when several Pokémon UI events happen at once.
+  - New Pokémon now roll a persistent 2% Shiny chance on hatch/gift/acquisition.
+  - Shiny Pokémon use shiny artwork when available, fallback to normal artwork if needed, and show sparkle/ring/badge visuals in class cards, profile, Lucky Wheel, and release flow.
+  - Fusion now follows Phase 4 integration: average input level, reset bond/charge/mastery, preserve current skill merge logic, and output shiny only when both input Pokémon are shiny.
+- Verified production build with `npm run build` after Pokémon Companion System 2.0 Phase 4 changes.
+- Added Pokémon Companion System 2.0 Phase 5 collection polish:
+  - Added permanent per-student Pokédex entries with discovered, shiny discovered, and first discovered timestamp data.
+  - Pokédex discovery is preserved through normalization and is marked when Pokémon are hatched, gifted, fused, selected, or released.
+  - Added `PokemonPokedexPanel` to the Pet Profile with discovered count, known artwork, hidden unknown entries, and shiny indicators.
+  - Added Level 30 Mastery XP conversion with five cosmetic star thresholds: 300, 700, 1200, 1800, and 2600 Mastery XP.
+  - Added Mastery reaction events and profile display for Mastery XP/stars after Lv.30.
+  - Upgraded Pokémon Profile hero with species, HP, Passive, Evolution Preview, and clearer Level/XP/Bond/Charge hierarchy.
+  - Upgraded owned collection cards with Level, HP, Bond, and shiny markers.
+- Verified production build with `npm run build` after Pokémon Companion System 2.0 Phase 5 changes.
 
 ## Manual Steps Needed
 

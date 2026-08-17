@@ -262,7 +262,16 @@ export const POKEMON_EVOLUTION_CHAINS: Record<number, { dexId: number; name: str
   ]
 };
 
-export function getEvolvedForm(baseDexId: number, points: number): { dexId: number; name: string; types: string[] } {
+const stableHash = (input: string): number => {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+};
+
+export function getEvolvedForm(baseDexId: number, points: number, variantSeed?: string): { dexId: number; name: string; types: string[] } {
   const chain = POKEMON_EVOLUTION_CHAINS[baseDexId];
   if (!chain) {
     // If not in our detailed list, fallback to standard database match or first element
@@ -273,9 +282,8 @@ export function getEvolvedForm(baseDexId: number, points: number): { dexId: numb
   // Calculate stage index based on increments of 200 points
   const stageIndex = Math.min(4, Math.max(0, Math.floor(points / 200)));
   const options = chain[stageIndex] || chain[chain.length - 1] || chain[0];
-  
-  // Deterministic random choice based on a seed (we can use points/dexId or just standard rolling if mutating)
-  const chosenIndex = Math.floor(Math.random() * options.length);
+
+  const seed = variantSeed || `${baseDexId}-${stageIndex}`;
+  const chosenIndex = stableHash(`${seed}-${stageIndex}`) % options.length;
   return options[chosenIndex] || options[0];
 }
-

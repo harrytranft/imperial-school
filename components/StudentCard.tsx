@@ -2,6 +2,7 @@
 import React from 'react';
 import { Student, RankInfo, Gender } from '../types';
 import { PetSkill } from '../pokemonData';
+import { getPokemonArtworkUrl, getPokemonDisplayName } from '../pokemonProgression';
 
 interface StudentCardProps {
   student: Student;
@@ -66,19 +67,25 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
               <div className="relative group/poke shrink-0">
                 <img 
                   referrerPolicy="no-referrer"
-                  src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pet.dexId}.png`}
-                  alt={pet.name}
-                  className="w-8 h-8 object-contain cursor-pointer transition-transform group-hover/poke:scale-125"
+                  src={getPokemonArtworkUrl(pet)}
+                  onError={event => {
+                    if (pet.isShiny) event.currentTarget.src = getPokemonArtworkUrl(pet, true);
+                  }}
+                  alt={getPokemonDisplayName(pet)}
+                  className={`w-8 h-8 object-contain cursor-pointer transition-transform group-hover/poke:scale-125 ${pet.isShiny ? 'rounded-full bg-amber-100 ring-2 ring-amber-300' : ''}`}
                 />
                 {/* Hover preview card showing enlarged Pokemon, name, and skills */}
                 <div className="absolute left-0 bottom-full mb-2 hidden group-hover/poke:flex flex-col bg-amber-950 text-white p-3 rounded-2xl shadow-2xl z-50 w-52 border border-amber-400/40 pointer-events-none animate-in fade-in zoom-in duration-200">
                   <img 
                     referrerPolicy="no-referrer"
-                    src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pet.dexId}.png`}
-                    alt={pet.name}
+                    src={getPokemonArtworkUrl(pet)}
+                    onError={event => {
+                      if (pet.isShiny) event.currentTarget.src = getPokemonArtworkUrl(pet, true);
+                    }}
+                    alt={getPokemonDisplayName(pet)}
                     className="w-24 h-24 object-contain mx-auto my-1"
                   />
-                  <p className="font-extrabold text-amber-300 text-sm text-center">{pet.name}</p>
+                  <p className="font-extrabold text-amber-300 text-sm text-center">{pet.isShiny ? '✨ ' : ''}{getPokemonDisplayName(pet)}</p>
                   <p className="text-[10px] text-amber-200/80 text-center uppercase font-mono">{pet.types?.join(', ')}</p>
                   <div className="mt-2 border-t border-amber-800/60 pt-1.5">
                     <p className="text-[9px] font-bold text-amber-400 uppercase tracking-wider mb-1">Kỹ năng sở hữu ({pet.skills?.length || 0}):</p>
@@ -117,14 +124,17 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
             <div className="w-10 h-10 shrink-0 bg-white rounded-xl border border-amber-200 p-0.5 flex items-center justify-center shadow-sm relative group/pet animate-in fade-in zoom-in duration-300">
               <img 
                 referrerPolicy="no-referrer"
-                src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pet.dexId}.png`}
+                src={getPokemonArtworkUrl(pet)}
+                onError={event => {
+                  if (pet.isShiny) event.currentTarget.src = getPokemonArtworkUrl(pet, true);
+                }}
                 className="w-full h-full object-contain"
-                alt={pet.name}
+                alt={getPokemonDisplayName(pet)}
               />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-1.5">
-                <p className="text-xs font-black text-amber-700 truncate">{pet.name}</p>
+                <p className="text-xs font-black text-amber-700 truncate">{pet.isShiny ? '✨ ' : ''}{getPokemonDisplayName(pet)} · Lv.{pet.level || 1}</p>
                 <span className="text-[9px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full">
                   ❤️ HP: {pet.hp ?? 100}/100
                 </span>

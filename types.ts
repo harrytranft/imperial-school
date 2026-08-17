@@ -18,14 +18,45 @@ export interface StudentEgg {
 }
 
 export interface PokemonPet {
+  instanceId?: string;
   dexId: number;
+  baseDexId?: number; // Original base Pokemon dexId for evolution stages
   name: string;
+  speciesName?: string;
+  nickname?: string;
   types: string[];
   hp?: number; // Health points (0 - 100)
   accessories: string[]; // List of accessory IDs
   skills: string[]; // List of skill IDs
   skillUses?: Record<string, number>; // Maps skillId to number of times used (max 2)
-  baseDexId?: number; // Original base Pokemon dexId for evolution stages
+  level?: number;
+  xp?: number;
+  totalXp?: number;
+  bond?: number;
+  charge?: number;
+  isShiny?: boolean;
+  masteryXp?: number;
+  masteryStars?: number;
+  passiveId?: string;
+}
+
+export interface StudentPokemonProgress {
+  answerStreak: number;
+  bestAnswerStreak: number;
+  battleWinStreak: number;
+  bestBattleWinStreak: number;
+  homeworkStreak: number;
+  bestHomeworkStreak: number;
+  lastHomeworkLessonKey?: string;
+  positiveSoloCount?: number;
+  battleWins?: number;
+}
+
+export interface PokemonPokedexEntry {
+  dexId: number;
+  discovered: boolean;
+  shinyDiscovered?: boolean;
+  firstDiscoveredAt?: number;
 }
 
 export interface Student {
@@ -40,6 +71,8 @@ export interface Student {
   egg?: StudentEgg;
   pet?: PokemonPet;
   pets?: PokemonPet[]; // List of all acquired pets
+  pokemonProgress?: StudentPokemonProgress;
+  pokedex?: Record<number, PokemonPokedexEntry>;
   ludoTile?: number; // Position on board (0 to 49)
   ludoSteps?: number; // Total step count
   ludoMonsterStuck?: boolean; // Trapped by monster flag
