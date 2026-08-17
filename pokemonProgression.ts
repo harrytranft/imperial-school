@@ -43,10 +43,37 @@ const spriteUrl = (dexId: number, cdn: 'jsdelivr' | 'raw' = 'jsdelivr'): string 
   return `${prefix}/sprites/pokemon/${dexId}.png`;
 };
 
+const normalizePokemonNameForArtwork = (name?: string): string => {
+  return (name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const findStandardArtworkDexId = (pet?: PokemonPet): number | undefined => {
+  const sourceName = normalizePokemonNameForArtwork(pet?.speciesName || pet?.name);
+  if (!sourceName) return undefined;
+
+  const exactMatch = LIST_POKEMONS.find(pokemon => normalizePokemonNameForArtwork(pokemon.name) === sourceName);
+  if (exactMatch) return exactMatch.dexId;
+
+  const nameMatch = [...LIST_POKEMONS]
+    .sort((a, b) => b.name.length - a.name.length)
+    .find(pokemon => sourceName.includes(normalizePokemonNameForArtwork(pokemon.name)));
+
+  return nameMatch?.dexId;
+};
+
 export const getPokemonArtworkCandidates = (pet?: PokemonPet, forceNormal = false): string[] => {
+  const requestedDexId = pet?.dexId || 25;
+  const standardArtworkDexId = findStandardArtworkDexId(pet);
   const dexIds = Array.from(new Set([
-    pet?.dexId || 25,
-    pet?.baseDexId || pet?.dexId || 25
+    requestedDexId > 1025 ? standardArtworkDexId : requestedDexId,
+    standardArtworkDexId,
+    pet?.baseDexId,
+    requestedDexId,
+    25
   ].filter(Boolean)));
   const candidates: string[] = [];
   const includeShiny = !!pet?.isShiny && !forceNormal;

@@ -44,8 +44,8 @@ describe('pokemon progression', () => {
 
     const candidates = getPokemonArtworkCandidates(pet);
 
+    expect(candidates[0]).toContain('/384.png');
     expect(candidates.some(url => url.includes('/10079.png'))).toBe(true);
-    expect(candidates.some(url => url.includes('/384.png'))).toBe(true);
   });
 });
 
