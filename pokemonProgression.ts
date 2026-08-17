@@ -31,7 +31,7 @@ export const getPokemonDisplayName = (pet?: PokemonPet): string => {
 export const getPokemonArtworkUrl = (pet?: PokemonPet, forceNormal = false): string => {
   const dexId = pet?.dexId || 25;
   const shinyPath = pet?.isShiny && !forceNormal ? 'shiny/' : '';
-  return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${shinyPath}${dexId}.png`;
+  return `https://cdn.jsdelivr.net/gh/PokeAPI/sprites@master/sprites/pokemon/other/official-artwork/${shinyPath}${dexId}.png`;
 };
 
 export const getDefaultPokemonProgress = (): StudentPokemonProgress => ({

@@ -93,6 +93,10 @@
   - Added `Check đi học` beside `Check Homework` for quick present/absent toggling.
   - Homework Check now has three states: Done (+8 Hào Quang, +8 Pokémon HP), Not Yet (no reward/penalty), and Missing (-10 Hào Quang, -10 Pokémon HP).
 - Verified production build with `npm run build` after class workflow follow-up adjustments.
+- Fixed Pokémon artwork loading failures caused by GitHub raw image rate limits:
+  - Switched app-wide Pokémon artwork URLs from `raw.githubusercontent.com` to the jsDelivr cached PokeAPI sprites CDN.
+  - Updated the student-facing HTML guide to use the same cached CDN URLs.
+- Verified production build with `npm run build` after the artwork CDN fix.
 
 ## Manual Steps Needed
 
