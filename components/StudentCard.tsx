@@ -2,7 +2,7 @@
 import React from 'react';
 import { Student, RankInfo, Gender } from '../types';
 import { PetSkill } from '../pokemonData';
-import { getPokemonArtworkUrl, getPokemonDisplayName } from '../pokemonProgression';
+import { getPokemonArtworkUrl, getPokemonDisplayName, handlePokemonArtworkError } from '../pokemonProgression';
 
 interface StudentCardProps {
   student: Student;
@@ -74,9 +74,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
                 <img 
                   referrerPolicy="no-referrer"
                   src={getPokemonArtworkUrl(pet)}
-                  onError={event => {
-                    if (pet.isShiny) event.currentTarget.src = getPokemonArtworkUrl(pet, true);
-                  }}
+                  onError={event => handlePokemonArtworkError(event, pet)}
                   alt={getPokemonDisplayName(pet)}
                   className={`w-8 h-8 object-contain cursor-pointer transition-transform group-hover/poke:scale-125 ${pet.isShiny ? 'rounded-full bg-amber-100 ring-2 ring-amber-300' : ''}`}
                 />
@@ -85,9 +83,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
                   <img 
                     referrerPolicy="no-referrer"
                     src={getPokemonArtworkUrl(pet)}
-                    onError={event => {
-                      if (pet.isShiny) event.currentTarget.src = getPokemonArtworkUrl(pet, true);
-                    }}
+                    onError={event => handlePokemonArtworkError(event, pet)}
                     alt={getPokemonDisplayName(pet)}
                     className="w-24 h-24 object-contain mx-auto my-1"
                   />
@@ -140,9 +136,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
               <img 
                 referrerPolicy="no-referrer"
                 src={getPokemonArtworkUrl(pet)}
-                onError={event => {
-                  if (pet.isShiny) event.currentTarget.src = getPokemonArtworkUrl(pet, true);
-                }}
+                onError={event => handlePokemonArtworkError(event, pet)}
                 className="w-full h-full object-contain"
                 alt={getPokemonDisplayName(pet)}
               />

@@ -1,6 +1,6 @@
 import React from 'react';
 import { PokemonPet, StudentPokemonProgress } from '../types';
-import { getPokemonArtworkUrl, getPokemonDisplayName, xpNeededForNextLevel } from '../pokemonProgression';
+import { getPokemonArtworkUrl, getPokemonDisplayName, handlePokemonArtworkError, xpNeededForNextLevel } from '../pokemonProgression';
 import { PokemonPassiveBadge } from './PokemonPassiveBadge';
 
 interface PokemonMiniStatusProps {
@@ -56,9 +56,7 @@ export const PokemonMiniStatus: React.FC<PokemonMiniStatusProps> = ({
           <img
             referrerPolicy="no-referrer"
             src={getPokemonArtworkUrl(pet)}
-            onError={event => {
-              if (pet.isShiny) event.currentTarget.src = getPokemonArtworkUrl(pet, true);
-            }}
+            onError={event => handlePokemonArtworkError(event, pet)}
             className={`h-14 w-14 shrink-0 object-contain drop-shadow ${pet.isShiny ? 'rounded-2xl bg-amber-100 ring-2 ring-amber-300' : ''}`}
             alt={getPokemonDisplayName(pet)}
           />

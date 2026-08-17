@@ -28,10 +28,86 @@ export const getPokemonDisplayName = (pet?: PokemonPet): string => {
   return pet.nickname || pet.speciesName || pet.name;
 };
 
+const officialArtworkUrl = (dexId: number, shiny = false, cdn: 'jsdelivr' | 'raw' = 'jsdelivr'): string => {
+  const shinyPath = shiny ? 'shiny/' : '';
+  const prefix = cdn === 'jsdelivr'
+    ? 'https://cdn.jsdelivr.net/gh/PokeAPI/sprites@master'
+    : 'https://raw.githubusercontent.com/PokeAPI/sprites/master';
+  return `${prefix}/sprites/pokemon/other/official-artwork/${shinyPath}${dexId}.png`;
+};
+
+const spriteUrl = (dexId: number, cdn: 'jsdelivr' | 'raw' = 'jsdelivr'): string => {
+  const prefix = cdn === 'jsdelivr'
+    ? 'https://cdn.jsdelivr.net/gh/PokeAPI/sprites@master'
+    : 'https://raw.githubusercontent.com/PokeAPI/sprites/master';
+  return `${prefix}/sprites/pokemon/${dexId}.png`;
+};
+
+export const getPokemonArtworkCandidates = (pet?: PokemonPet, forceNormal = false): string[] => {
+  const dexIds = Array.from(new Set([
+    pet?.dexId || 25,
+    pet?.baseDexId || pet?.dexId || 25
+  ].filter(Boolean)));
+  const candidates: string[] = [];
+  const includeShiny = !!pet?.isShiny && !forceNormal;
+
+  dexIds.forEach(dexId => {
+    if (includeShiny) {
+      candidates.push(officialArtworkUrl(dexId, true, 'jsdelivr'));
+      candidates.push(officialArtworkUrl(dexId, true, 'raw'));
+    }
+    candidates.push(officialArtworkUrl(dexId, false, 'jsdelivr'));
+    candidates.push(officialArtworkUrl(dexId, false, 'raw'));
+    candidates.push(spriteUrl(dexId, 'jsdelivr'));
+    candidates.push(spriteUrl(dexId, 'raw'));
+  });
+
+  return Array.from(new Set(candidates));
+};
+
+export const getPokemonFallbackPlaceholderUrl = (pet?: PokemonPet): string => {
+  const name = getPokemonDisplayName(pet) || 'Pokemon';
+  const types = pet?.types?.join(' / ') || 'Pokemon';
+  const escapedName = name.replace(/[<>&"]/g, '');
+  const escapedTypes = types.replace(/[<>&"]/g, '');
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240">
+      <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#fff7ed"/>
+          <stop offset="55%" stop-color="#fef3c7"/>
+          <stop offset="100%" stop-color="#fee2e2"/>
+        </linearGradient>
+      </defs>
+      <rect width="240" height="240" rx="44" fill="url(#bg)"/>
+      <circle cx="120" cy="100" r="58" fill="#ffffff" stroke="#f59e0b" stroke-width="8"/>
+      <path d="M62 100h116" stroke="#111827" stroke-width="10" stroke-linecap="round"/>
+      <circle cx="120" cy="100" r="18" fill="#ffffff" stroke="#111827" stroke-width="8"/>
+      <text x="120" y="183" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="800" fill="#92400e">${escapedName.slice(0, 18)}</text>
+      <text x="120" y="207" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#b45309">${escapedTypes.slice(0, 24)}</text>
+    </svg>
+  `;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+};
+
 export const getPokemonArtworkUrl = (pet?: PokemonPet, forceNormal = false): string => {
-  const dexId = pet?.dexId || 25;
-  const shinyPath = pet?.isShiny && !forceNormal ? 'shiny/' : '';
-  return `https://cdn.jsdelivr.net/gh/PokeAPI/sprites@master/sprites/pokemon/other/official-artwork/${shinyPath}${dexId}.png`;
+  return getPokemonArtworkCandidates(pet, forceNormal)[0] || getPokemonFallbackPlaceholderUrl(pet);
+};
+
+export const handlePokemonArtworkError = (event: { currentTarget: HTMLImageElement }, pet?: PokemonPet): void => {
+  const target = event.currentTarget;
+  const currentIndex = Number(target.dataset.pokemonArtworkFallbackIndex || '0');
+  const candidates = getPokemonArtworkCandidates(pet);
+  const nextIndex = currentIndex + 1;
+
+  if (nextIndex < candidates.length) {
+    target.dataset.pokemonArtworkFallbackIndex = String(nextIndex);
+    target.src = candidates[nextIndex];
+    return;
+  }
+
+  target.dataset.pokemonArtworkFallbackIndex = String(nextIndex);
+  target.src = getPokemonFallbackPlaceholderUrl(pet);
 };
 
 export const getDefaultPokemonProgress = (): StudentPokemonProgress => ({

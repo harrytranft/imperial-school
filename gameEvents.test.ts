@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LIST_POKEMONS } from './pokemonData';
 import { Gender, Student } from './types';
 import { applyGameEventToStudent, applyPetHpDeltaToStudent } from './gameEvents';
-import { addPokemonXp, createPokemonPetFromDexId, totalXpForLevel } from './pokemonProgression';
+import { addPokemonXp, createPokemonPetFromDexId, getPokemonArtworkCandidates, totalXpForLevel } from './pokemonProgression';
 
 const makeStudent = (overrides: Partial<Student> = {}): Student => ({
   id: 'student-1',
@@ -31,6 +31,21 @@ describe('pokemon progression', () => {
     expect(result.levelUps).toBe(4);
     expect(result.evolved).toBe(true);
     expect(result.pet.speciesName).toBe('Ivysaur');
+  });
+
+  it('provides base species artwork fallbacks for special forms', () => {
+    const pet = {
+      ...createPokemonPetFromDexId(384, undefined, { isShiny: false }),
+      dexId: 10079,
+      baseDexId: 384,
+      speciesName: 'Mega Rayquaza',
+      name: 'Mega Rayquaza'
+    };
+
+    const candidates = getPokemonArtworkCandidates(pet);
+
+    expect(candidates.some(url => url.includes('/10079.png'))).toBe(true);
+    expect(candidates.some(url => url.includes('/384.png'))).toBe(true);
   });
 });
 

@@ -23,6 +23,7 @@ import { fetchUserSettings, upsertUserSettings } from './supabaseData';
 import { applyGameEventToStudent, applyPetHpDeltaToStudent, GameEventSource, PokemonUiEvent } from './gameEvents';
 import {
   createPokemonPetFromDexId,
+  handlePokemonArtworkError,
   getPokemonArtworkUrl,
   getPokemonDisplayName,
   getNextMasteryTarget,
@@ -3337,9 +3338,7 @@ const App: React.FC = () => {
                               <div className="flex items-center gap-2 min-w-0">
                                 <img 
                                   src={getPokemonArtworkUrl(p)}
-                                  onError={event => {
-                                    if (p.isShiny) event.currentTarget.src = getPokemonArtworkUrl(p, true);
-                                  }}
+	                                  onError={event => handlePokemonArtworkError(event, p)}
                                   className="w-10 h-10 object-contain shrink-0" 
                                 />
                                 <div className="min-w-0">
@@ -3369,9 +3368,7 @@ const App: React.FC = () => {
                         <img 
                           referrerPolicy="no-referrer"
                           src={getPokemonArtworkUrl(editingStudent.pet)}
-                          onError={event => {
-                            if (editingStudent.pet?.isShiny) event.currentTarget.src = getPokemonArtworkUrl(editingStudent.pet, true);
-                          }}
+	                          onError={event => handlePokemonArtworkError(event, editingStudent.pet)}
                           className={`w-full h-full object-contain relative z-10 drop-shadow-xl animate-in duration-500 hover:rotate-6 transition-transform ${editingStudent.pet.isShiny ? 'rounded-2xl bg-amber-100/70 ring-4 ring-amber-300' : ''}`}
                           alt={getPokemonDisplayName(editingStudent.pet)}
                         />
@@ -3503,9 +3500,7 @@ const App: React.FC = () => {
                                 <div className="flex items-center gap-2 min-w-0">
                                   <img 
                                     src={getPokemonArtworkUrl(p)}
-                                    onError={event => {
-                                      if (p.isShiny) event.currentTarget.src = getPokemonArtworkUrl(p, true);
-                                    }}
+	                                    onError={event => handlePokemonArtworkError(event, p)}
                                     className="w-10 h-10 object-contain shrink-0" 
                                   />
                                   <div className="min-w-0">
@@ -3659,9 +3654,7 @@ const App: React.FC = () => {
                             >
                               <img
                                 src={getPokemonArtworkUrl(p)}
-                                onError={event => {
-                                  if (p.isShiny) event.currentTarget.src = getPokemonArtworkUrl(p, true);
-                                }}
+	                                onError={event => handlePokemonArtworkError(event, p)}
                                 className="w-16 h-16 object-contain shrink-0"
                               />
                               <div className="min-w-0 flex-1">
@@ -4013,9 +4006,7 @@ const App: React.FC = () => {
                         <img 
                           referrerPolicy="no-referrer"
                           src={getPokemonArtworkUrl(sidebarData.student.pet)}
-                          onError={event => {
-                            if (sidebarData.student.pet?.isShiny) event.currentTarget.src = getPokemonArtworkUrl(sidebarData.student.pet, true);
-                          }}
+	                          onError={event => handlePokemonArtworkError(event, sidebarData.student.pet)}
                           className="w-20 h-20 object-contain drop-shadow"
                           alt={getPokemonDisplayName(sidebarData.student.pet)}
                         />
@@ -4577,9 +4568,7 @@ const App: React.FC = () => {
                           <img
                             referrerPolicy="no-referrer"
                             src={getPokemonArtworkUrl(luckyWheelResult.pokemon)}
-                            onError={event => {
-                              if (luckyWheelResult.pokemon?.isShiny) event.currentTarget.src = getPokemonArtworkUrl(luckyWheelResult.pokemon, true);
-                            }}
+	                            onError={event => handlePokemonArtworkError(event, luckyWheelResult.pokemon)}
                             className={`w-28 h-28 object-contain mx-auto mt-3 drop-shadow ${luckyWheelResult.pokemon.isShiny ? 'rounded-3xl bg-amber-100 ring-4 ring-amber-300' : ''}`}
                             alt={getPokemonDisplayName(luckyWheelResult.pokemon)}
                           />
@@ -5045,9 +5034,7 @@ const App: React.FC = () => {
                 <img
                   referrerPolicy="no-referrer"
                   src={getPokemonArtworkUrl(pokemonReleaseEvent.releasedPet)}
-                  onError={event => {
-                    if (pokemonReleaseEvent.releasedPet.isShiny) event.currentTarget.src = getPokemonArtworkUrl(pokemonReleaseEvent.releasedPet, true);
-                  }}
+	                  onError={event => handlePokemonArtworkError(event, pokemonReleaseEvent.releasedPet)}
                   className={`w-36 h-36 object-contain mx-auto drop-shadow-xl grayscale-[20%] ${pokemonReleaseEvent.releasedPet.isShiny ? 'rounded-3xl bg-amber-100 ring-4 ring-amber-300' : ''}`}
                   alt={getPokemonDisplayName(pokemonReleaseEvent.releasedPet)}
                 />
@@ -5072,9 +5059,7 @@ const App: React.FC = () => {
                         <img
                           referrerPolicy="no-referrer"
                           src={getPokemonArtworkUrl(pet)}
-                          onError={event => {
-                            if (pet.isShiny) event.currentTarget.src = getPokemonArtworkUrl(pet, true);
-                          }}
+	                          onError={event => handlePokemonArtworkError(event, pet)}
                           className="w-20 h-20 object-contain mx-auto"
                           alt={getPokemonDisplayName(pet)}
                         />
