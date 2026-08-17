@@ -44,17 +44,6 @@ const buildCatalog = (): PokedexSpecies[] => {
 
 const CATALOG = buildCatalog();
 
-const getEvolutionPath = (species: PokedexSpecies) => {
-  const chain = POKEMON_EVOLUTION_CHAINS[species.baseDexId || species.dexId];
-  if (!chain) return [[species]];
-  return chain.map(stage => stage.map(option => ({
-    dexId: option.dexId,
-    name: option.name,
-    types: option.types,
-    baseDexId: species.baseDexId || species.dexId
-  })));
-};
-
 export const GlobalPokedexModal: React.FC<GlobalPokedexModalProps> = ({ students, getRank, onClose }) => {
   const ownership = useMemo(() => {
     const ownerMap = new Map<number, { owners: Student[]; shiny: boolean }>();
@@ -105,7 +94,6 @@ export const GlobalPokedexModal: React.FC<GlobalPokedexModalProps> = ({ students
             const owner = owned?.owners[0];
             const ownerRank = owner ? getRank(owner.points, owner.gender) : null;
             const displaySpecies = getSpeciesForDexId(species.dexId, species.baseDexId);
-            const evolutionPath = getEvolutionPath(species);
 
             return (
               <div
@@ -182,34 +170,6 @@ export const GlobalPokedexModal: React.FC<GlobalPokedexModalProps> = ({ students
                       <span key={type} className="rounded-full bg-white/15 px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-cyan-100">
                         {type}
                       </span>
-                    ))}
-                  </div>
-                  <p className="mt-3 text-[9px] font-black uppercase tracking-[0.18em] text-amber-200">Evolution path</p>
-                  <div className="mt-2 flex items-center gap-1 overflow-hidden">
-                    {evolutionPath.map((stage, index) => (
-                      <React.Fragment key={`${species.dexId}-stage-${index}`}>
-                        <div className="flex min-w-0 gap-1">
-                          {stage.slice(0, 2).map(option => (
-                            <div key={`${option.dexId}-${option.name}`} className="min-w-[42px] text-center">
-                              <img
-                                referrerPolicy="no-referrer"
-                                src={getPokemonArtworkUrl({
-                                  dexId: option.dexId,
-                                  name: option.name,
-                                  speciesName: option.name,
-                                  types: option.types,
-                                  accessories: [],
-                                  skills: []
-                                })}
-                                className="mx-auto h-9 w-9 object-contain"
-                                alt={option.name}
-                              />
-                              <p className="truncate text-[7px] font-bold text-white/70">{option.name}</p>
-                            </div>
-                          ))}
-                        </div>
-                        {index < evolutionPath.length - 1 && <span className="text-[10px] font-black text-white/40">→</span>}
-                      </React.Fragment>
                     ))}
                   </div>
                 </div>

@@ -97,6 +97,10 @@
   - Switched app-wide Pokémon artwork URLs from `raw.githubusercontent.com` to the jsDelivr cached PokeAPI sprites CDN.
   - Updated the student-facing HTML guide to use the same cached CDN URLs.
 - Verified production build with `npm run build` after the artwork CDN fix.
+- Fixed class workflow regressions:
+  - Removed the Evolution Path hover section from the global Pokédex page while keeping the full Pokémon database catalog.
+  - Fixed the Check đi học modal white-screen issue by wiring it to the existing `toggleAttendance` handler.
+- Verified production build with `npm run build` after the Pokédex/attendance fix.
 
 ## Manual Steps Needed
 

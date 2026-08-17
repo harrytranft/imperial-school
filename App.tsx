@@ -5098,7 +5098,7 @@ const App: React.FC = () => {
         <AttendanceCheckModal
           students={currentClassStudents}
           getRank={getRank}
-          onToggle={handleToggleAbsent}
+          onToggle={toggleAttendance}
           onClose={() => setShowAttendanceModal(false)}
         />
       )}
