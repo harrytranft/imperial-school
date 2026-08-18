@@ -11,6 +11,7 @@ import {
 import { StudentCard } from './components/StudentCard';
 import { LiquidDock } from './components/LiquidDock';
 import { StatusDock } from './components/StatusDock';
+import { StudentAvatar } from './components/StudentAvatar';
 import { AttendanceCheckModal } from './components/AttendanceCheckModal';
 import { HomeworkCheckModal } from './components/HomeworkCheckModal';
 import { HomeworkStatus } from './components/HomeworkCheckModal';
@@ -39,7 +40,7 @@ import {
 } from './pokemonProgression';
 
 
-type Screen = 'school' | 'class' | 'profile' | 'settings';
+type Screen = 'plaza' | 'class' | 'profile' | 'settings';
 
 interface LuckyWheelResult {
   student: Student;
@@ -71,6 +72,20 @@ interface ShopReviewItem {
   canAfford: boolean;
 }
 
+interface TrainerWeather {
+  temperature: number;
+  weatherCode: number;
+  isDay: boolean;
+  updatedAt: number;
+  label: string;
+}
+
+interface TrainerLocation {
+  label: string;
+  latitude: number;
+  longitude: number;
+}
+
 const getLocalDateKey = (date = new Date()) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -99,7 +114,7 @@ const AuthLoginForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
     }
 
     if (authTab === 'register' && !displayName.trim()) {
-      setErrorMsg("Vui lòng nhập Tên sỹ phu / Tôn hiệu.");
+      setErrorMsg("Vui lòng nhập tên giáo viên.");
       return;
     }
 
@@ -162,14 +177,14 @@ const AuthLoginForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         {authTab === 'register' && (
           <div>
             <label className="block text-[10px] font-black uppercase tracking-wider text-stone-500 mb-1">
-              Tên Sỹ Phu / Tôn Hiệu
+              Tên giáo viên
             </label>
             <input
               type="text"
               required
               value={displayName}
               onChange={e => setDisplayName(e.target.value)}
-              placeholder="Ví dụ: Quan Trường Ngô Văn A"
+              placeholder="Ví dụ: Thầy/Cô Nguyễn"
               className="w-full border border-stone-300 p-3 rounded-xl text-xs font-bold outline-none focus:ring-2 ring-red-800/30"
             />
           </div>
@@ -214,7 +229,7 @@ const AuthLoginForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
               <span>Đang Xử Lý...</span>
             </>
           ) : authTab === 'login' ? (
-            <span>🚀 Đăng Nhập Sỹ Phu</span>
+            <span>Đăng nhập</span>
           ) : (
             <span>✨ Tạo Tài Khoản Mới</span>
           )}
@@ -289,7 +304,7 @@ const App: React.FC = () => {
     return DEFAULT_PET_SKILLS;
   });
   
-  const [currentScreen, setCurrentScreen] = useState<Screen>('school');
+  const [currentScreen, setCurrentScreen] = useState<Screen>('class');
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
   const [showSkillModal, setShowSkillModal] = useState(false);
@@ -358,6 +373,7 @@ const App: React.FC = () => {
   const [luckyWheelDisplayRewards, setLuckyWheelDisplayRewards] = useState<LuckyWheelReward[]>(DEFAULT_LUCKY_WHEEL_REWARDS);
   const luckyWheelRef = useRef<HTMLDivElement | null>(null);
   const luckyWheelSpinAudioRef = useRef<HTMLAudioElement | null>(null);
+  const luckyWheelSpinSynthRef = useRef<{ context: AudioContext; intervalId: number } | null>(null);
 
   // Cá Ngựa / Ludo Game State
   const [showLudoModal, setShowLudoModal] = useState(false);
@@ -451,15 +467,28 @@ const App: React.FC = () => {
   const [profileSaving, setProfileSaving] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [settingsCollapsed, setSettingsCollapsed] = useState<Record<string, boolean>>({
-    sound: false,
-    ranks: false,
-    skills: false,
-    petSkills: false,
-    pokemonReset: false,
-    ludo: false,
-    luckyWheel: false,
-    data: false
+    weather: true,
+    sound: true,
+    skills: true,
+    petSkills: true,
+    pokemonReset: true,
+    ludo: true,
+    luckyWheel: true,
+    data: true
   });
+  const [weatherLocationInput, setWeatherLocationInput] = useState(() => localStorage.getItem('trainer_weather_location_input') || 'Hanoi');
+  const [trainerLocation, setTrainerLocation] = useState<TrainerLocation | null>(() => {
+    const saved = localStorage.getItem('trainer_weather_location');
+    if (!saved) return null;
+    try {
+      return JSON.parse(saved);
+    } catch {
+      return null;
+    }
+  });
+  const [trainerWeather, setTrainerWeather] = useState<TrainerWeather | null>(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherError, setWeatherError] = useState<string | null>(null);
 
   useEffect(() => {
     if (profile) {
@@ -878,6 +907,108 @@ const App: React.FC = () => {
     }
   }, [activeLudoClassName, ludoActiveStudent]);
 
+  const getWeatherMood = (weather?: TrainerWeather | null) => {
+    if (!weather) return 'clear';
+    if (!weather.isDay) return 'night';
+    if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99].includes(weather.weatherCode)) return 'rain';
+    if ([71, 73, 75, 77, 85, 86].includes(weather.weatherCode)) return 'snow';
+    if ([45, 48].includes(weather.weatherCode)) return 'fog';
+    return 'sunny';
+  };
+
+  const getWeatherLabel = (code: number) => {
+    if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return 'Đang mưa';
+    if ([95, 96, 99].includes(code)) return 'Có giông';
+    if ([71, 73, 75, 77, 85, 86].includes(code)) return 'Có tuyết';
+    if ([45, 48].includes(code)) return 'Có sương';
+    if ([0, 1].includes(code)) return 'Trời quang';
+    if ([2, 3].includes(code)) return 'Nhiều mây';
+    return 'Thời tiết hiện tại';
+  };
+
+  const fetchWeatherForLocation = async (location: TrainerLocation) => {
+    setWeatherLoading(true);
+    setWeatherError(null);
+    try {
+      const weatherResponse = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}&longitude=${location.longitude}&current=temperature_2m,weather_code,is_day&timezone=auto`);
+      if (!weatherResponse.ok) throw new Error('Không tải được dữ liệu thời tiết.');
+      const weatherJson = await weatherResponse.json();
+      const current = weatherJson.current;
+      const weather: TrainerWeather = {
+        temperature: Math.round(current?.temperature_2m ?? 0),
+        weatherCode: Number(current?.weather_code ?? 0),
+        isDay: Number(current?.is_day ?? 1) === 1,
+        updatedAt: Date.now(),
+        label: getWeatherLabel(Number(current?.weather_code ?? 0))
+      };
+      setTrainerWeather(weather);
+      setTrainerLocation(location);
+      localStorage.setItem('trainer_weather_location', JSON.stringify(location));
+      localStorage.setItem('trainer_weather_location_input', location.label);
+      setWeatherLocationInput(location.label);
+    } catch (err: any) {
+      setWeatherError(err?.message || 'Không tải được dữ liệu thời tiết.');
+    } finally {
+      setWeatherLoading(false);
+    }
+  };
+
+  const refreshWeatherByAddress = async () => {
+    const query = weatherLocationInput.trim();
+    if (!query) {
+      setWeatherError('Hãy nhập địa chỉ hoặc thành phố.');
+      return;
+    }
+    setWeatherLoading(true);
+    setWeatherError(null);
+    try {
+      const geoResponse = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=vi&format=json`);
+      if (!geoResponse.ok) throw new Error('Không tìm thấy vị trí.');
+      const geoJson = await geoResponse.json();
+      const result = geoJson.results?.[0];
+      if (!result) throw new Error('Không tìm thấy vị trí phù hợp.');
+      await fetchWeatherForLocation({
+        label: [result.name, result.admin1, result.country].filter(Boolean).join(', '),
+        latitude: result.latitude,
+        longitude: result.longitude
+      });
+    } catch (err: any) {
+      setWeatherError(err?.message || 'Không tìm thấy vị trí phù hợp.');
+      setWeatherLoading(false);
+    }
+  };
+
+  const refreshWeatherByBrowserLocation = () => {
+    if (!navigator.geolocation) {
+      setWeatherError('Trình duyệt chưa hỗ trợ tự xác định vị trí.');
+      return;
+    }
+    setWeatherLoading(true);
+    setWeatherError(null);
+    navigator.geolocation.getCurrentPosition(
+      position => {
+        fetchWeatherForLocation({
+          label: 'Vị trí hiện tại',
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude
+        });
+      },
+      () => {
+        setWeatherError('Không lấy được vị trí tự động. Bạn có thể nhập địa chỉ thủ công.');
+        setWeatherLoading(false);
+      },
+      { enableHighAccuracy: false, timeout: 10000 }
+    );
+  };
+
+  useEffect(() => {
+    if (trainerLocation) {
+      fetchWeatherForLocation(trainerLocation);
+    } else if (weatherLocationInput.trim()) {
+      refreshWeatherByAddress();
+    }
+  }, []);
+
   // Actions
   const openLudoForClass = (className?: string, activeStudent?: Student | null) => {
     const nextClass = className || (filterClass !== 'Tất cả' ? filterClass : classOptions[0] || '');
@@ -900,7 +1031,7 @@ const App: React.FC = () => {
       .filter(Boolean) as { turn: BattleLudoTurn; student: Student }[];
 
     if (validTurns.length === 0) {
-      alert("Không có học sinh hợp lệ để lắc Cá Ngựa sau Battle.");
+      alert("Không có trainer hợp lệ để lắc Cá Ngựa sau Battle.");
       return;
     }
 
@@ -1109,7 +1240,7 @@ const App: React.FC = () => {
           progressionEvents = [...progressionEvents, ...progressionResult.uiEvents];
           progressionResult.uiEvents
             .filter(event => event.type === 'evolution')
-            .forEach(event => evolvedMessages.push(`Linh thú của ${s.name}: ${event.message}!`));
+            .forEach(event => evolvedMessages.push(`Pokémon của ${s.name}: ${event.message}!`));
         }
 
         return {
@@ -1154,10 +1285,10 @@ const App: React.FC = () => {
       }
       showPokemonReaction(toastEvents, amount >= 0 ? 'Pokémon phản ứng vui vẻ' : 'Pokémon vẫn cố gắng');
     } else if (hatchedNames.length > 0) {
-      setHatchSuccessMessage(`Tin vui chấn động triều đình! Quả trứng của học sĩ ${hatchedNames.join(', ')} đã nứt vỡ ra một Pokémon Cưng vô cùng đáng yêu! 🥚🐣💖`);
+      setHatchSuccessMessage(`Tin vui! Quả trứng của trainer ${hatchedNames.join(', ')} đã nở ra một Pokémon đồng hành mới! 🥚🐣`);
       setShowHatchModal(true);
     } else if (evolvedMessages.length > 0) {
-      setHatchSuccessMessage(`✨ TIẾN HÓA THĂNG HOA ✨\n\n${evolvedMessages.join('\n')}\nĐạo pháp thâm sâu, linh khí đong đầy! Hãy vinh danh học sĩ.`);
+      setHatchSuccessMessage(`✨ POKÉMON EVOLUTION ✨\n\n${evolvedMessages.join('\n')}\nHãy chúc mừng trainer và Pokémon đồng hành.`);
       setShowHatchModal(true);
     }
 
@@ -1175,7 +1306,7 @@ const App: React.FC = () => {
     const student = students.find(s => s.id === studentId);
     if (!student) return;
     if (student.points < cost) {
-      alert(`Không đủ Hào quang! Học sĩ cần thêm ${cost - student.points} điểm để giác ngộ truyền thừa ${skillName}.`);
+      alert(`Không đủ Hào quang! Trainer cần thêm ${cost - student.points} điểm để học skill ${skillName}.`);
       return;
     }
 
@@ -1214,7 +1345,7 @@ const App: React.FC = () => {
 
     setStudents(updatedStudents);
     new Audio(posSoundUrl).play().catch(() => {});
-    alert(`Đại sư Pet cưng đã thông tuệ bí kíp ${skillName}! Khấu trừ ${cost} điểm.`);
+    alert(`Pokémon đã học skill ${skillName}! Khấu trừ ${cost} điểm.`);
   };
 
   const handleRenamePet = (studentId: string, newName: string) => {
@@ -1247,10 +1378,10 @@ const App: React.FC = () => {
     const eggLabel = getEggLabel(kind);
     const requiredProgress = kind === 'special' ? 15 : 10;
     if (s.points < cost) {
-      alert(`Không đủ Hào quang! Học sĩ cần tối thiểu ${cost} điểm để thỉnh ${eggLabel}.`);
+      alert(`Không đủ Hào quang! Trainer cần tối thiểu ${cost} điểm để mua ${eggLabel}.`);
       return false;
     }
-    if (!options.skipConfirm && !window.confirm(`Bạn có đồng ý thỉnh ${eggLabel} bằng cách tiêu hao ${cost}đ Hào Quang? Trứng này cần +${requiredProgress} Hào Quang để nở.`)) return false;
+    if (!options.skipConfirm && !window.confirm(`Bạn có đồng ý mua ${eggLabel} bằng cách tiêu hao ${cost}đ Hào Quang? Trứng này cần +${requiredProgress} Hào Quang để nở.`)) return false;
     
     // Save current companion in collection
     const currentActivePet = s.pet;
@@ -1290,7 +1421,7 @@ const App: React.FC = () => {
 
   const handleOpenShop = () => {
     if (currentClassStudents.length === 0) {
-      alert('Chưa có học sinh trong lớp hiện tại để mở Shop.');
+      alert('Chưa có trainer trong lớp hiện tại để mở Shop.');
       return;
     }
     setShopSelections({});
@@ -1367,7 +1498,7 @@ const App: React.FC = () => {
     if (!shopReview) return;
     const purchasableItems = shopReview.filter(item => item.canAfford);
     if (purchasableItems.length === 0) {
-      alert('Chưa có học sinh nào đủ Hào Quang để mua các món đã chọn.');
+      alert('Chưa có trainer nào đủ Hào Quang để mua các món đã chọn.');
       return;
     }
     const purchaseMap = new Map(purchasableItems.map(item => [item.studentId, item]));
@@ -1436,7 +1567,7 @@ const App: React.FC = () => {
     setShopSelections({});
     new Audio(posSoundUrl).play().catch(() => {});
     showPokemonReaction(
-      [{ type: 'bond', message: `${purchasableItems.length} học sinh đã mua đồ trong Shop` }],
+      [{ type: 'bond', message: `${purchasableItems.length} trainer đã mua đồ trong Shop` }],
       'Shop đã chốt đơn'
     );
   };
@@ -1466,7 +1597,7 @@ const App: React.FC = () => {
 
     setStudents(prev => prev.map(x => x.id === studentId ? updatedS : x));
     setEditingStudent(updatedS);
-    alert(`Linh thú ${getPokemonDisplayName(nextPet)} đã hiện diện kề vai sát cánh cùng học sĩ!`);
+    alert(`Pokémon ${getPokemonDisplayName(nextPet)} đã trở lại đồng hành cùng trainer!`);
   };
 
   const handleUsePetSkill = (studentId: string, skillId: string, skillName: string) => {
@@ -1481,7 +1612,7 @@ const App: React.FC = () => {
       return;
     }
 
-    if (!window.confirm(`Bạn có đồng ý kích hoạt tuyệt học [${skillName}] của Linh thú?`)) return;
+    if (!window.confirm(`Bạn có đồng ý kích hoạt skill [${skillName}] của Pokémon?`)) return;
 
     const nextUses = currentUses + 1;
     let skillsList = [...s.pet.skills];
@@ -1500,7 +1631,7 @@ const App: React.FC = () => {
     const historyItem: HistoryItem = {
       id: Date.now().toString() + Math.random(),
       amount: 0,
-      reason: `[Linh Thú] Pháp thuật kích hoạt: ${skillName} (${nextUses}/2)`,
+      reason: `[Pokémon] Kích hoạt skill: ${skillName} (${nextUses}/2)`,
       timestamp: Date.now()
     };
 
@@ -1626,7 +1757,7 @@ const App: React.FC = () => {
           });
         }
 
-        alert("Chúc mừng! Đã phục hồi toàn bộ cơ sở dữ liệu triều đình thành công hoàn tất! ⚜️🏯✨");
+        alert("Đã phục hồi toàn bộ dữ liệu Trainer Hub thành công!");
       } catch (err) {
         console.error("Import JSON failed", err);
         alert("Có lỗi xảy ra: Không thể giải mã tập tin JSON này! Xin vui lòng kiểm tra lại cấu trúc file.");
@@ -1659,7 +1790,7 @@ const App: React.FC = () => {
       });
       setLastSyncedTime(updatedAt);
       if (!silent) {
-        alert("Khánh chúc! Toàn bộ cơ sở dữ liệu học lục, sỹ tử và thiên sủng triều đình đã được SAO LƯU lên Đám mây (Supabase) thành công! ⚜️☁️✨");
+        alert("Toàn bộ dữ liệu trainer, Pokémon và lớp học đã được sao lưu lên đám mây thành công!");
       }
     } catch (err) {
       console.error("Backup to Cloud failed:", err);
@@ -1727,7 +1858,7 @@ const App: React.FC = () => {
           localStorage.setItem(LUCKY_WHEEL_REWARDS_KEY, JSON.stringify(cloudData.luckyWheelRewards));
         }
         setLastSyncedTime(cloudData.updatedAt || Date.now());
-        alert("Khánh chúc! Đã PHỤC HỒI dữ liệu từ đám mây thành công tốt đẹp! Toàn bộ sỹ tử và tiên thú đã hội quân. ⚜️☁️✨");
+        alert("Đã khôi phục dữ liệu từ đám mây thành công!");
       } else {
         alert("Không tìm thấy bản sao lưu nào của người dùng này trên Đám mây!");
       }
@@ -1743,8 +1874,8 @@ const App: React.FC = () => {
     if (selectedStudentIds.length === 0) return;
     const count = selectedStudentIds.length;
     const confirmMsg = count === 1 
-      ? `Bạn có chắc chắn muốn xóa học sĩ này khỏi triều đình?` 
-      : `Bạn có chắc chắn muốn xóa ${count} học sĩ đã chọn khỏi triều đình?`;
+      ? `Bạn có chắc chắn muốn xóa trainer này?` 
+      : `Bạn có chắc chắn muốn xóa ${count} trainer đã chọn?`;
     
     if (window.confirm(confirmMsg)) {
       setStudents(prev => prev.filter(s => !selectedStudentIds.includes(s.id)));
@@ -1783,10 +1914,10 @@ const App: React.FC = () => {
   const handleResetPokemonLevels = () => {
     const affectedCount = students.filter(student => student.pet || (student.pets && student.pets.length > 0)).length;
     if (affectedCount === 0) {
-      alert('Chưa có học sinh nào có Pokémon để reset level.');
+      alert('Chưa có trainer nào có Pokémon để reset level.');
       return;
     }
-    if (!window.confirm(`Reset level toàn bộ Pokémon của ${affectedCount} học sinh về Level 1? Hào Quang, HP, kỹ năng và phụ kiện vẫn được giữ nguyên.`)) {
+    if (!window.confirm(`Reset level toàn bộ Pokémon của ${affectedCount} trainer về Level 1? Hào Quang, HP, kỹ năng và phụ kiện vẫn được giữ nguyên.`)) {
       return;
     }
 
@@ -1803,22 +1934,22 @@ const App: React.FC = () => {
     }
 
     showPokemonReaction(
-      [{ type: 'level-up', message: `${affectedCount} học sinh: Pokémon đã về Level 1` }],
+      [{ type: 'level-up', message: `${affectedCount} trainer: Pokémon đã về Level 1` }],
       'Reset Level Pokémon'
     );
   };
 
   const handleResetSelectedAura = () => {
     if (selectedStudentIds.length === 0) {
-      alert('Hãy chọn học sinh cần reset Hào Quang trước.');
+      alert('Hãy chọn trainer cần reset Hào Quang trước.');
       return;
     }
     const selectedStudents = students.filter(student => selectedStudentIds.includes(student.id));
     if (selectedStudents.length === 0) {
-      alert('Không tìm thấy học sinh đã chọn.');
+      alert('Không tìm thấy trainer đã chọn.');
       return;
     }
-    if (!window.confirm(`Reset Hào Quang của ${selectedStudents.length} học sinh đã chọn về 0? Pokémon hiện có vẫn được giữ nguyên.`)) {
+    if (!window.confirm(`Reset Hào Quang của ${selectedStudents.length} trainer đã chọn về 0? Pokémon hiện có vẫn được giữ nguyên.`)) {
       return;
     }
 
@@ -1852,7 +1983,7 @@ const App: React.FC = () => {
     setIsMultiSelectMode(false);
 
     showPokemonReaction(
-      [{ type: 'bond', message: `${selectedStudents.length} học sinh đã reset Hào Quang về 0` }],
+      [{ type: 'bond', message: `${selectedStudents.length} trainer đã reset Hào Quang về 0` }],
       'Reset Hào Quang'
     );
   };
@@ -1885,7 +2016,7 @@ const App: React.FC = () => {
 
   const openHomeworkCheck = () => {
     if (presentStudents.length === 0) {
-      alert("Không có học sinh đang hiện diện để check BTVN.");
+      alert("Không có trainer đang hiện diện để check BTVN.");
       return;
     }
     const defaultStatuses: Record<string, HomeworkStatus> = {};
@@ -1898,7 +2029,7 @@ const App: React.FC = () => {
 
   const openAttendanceCheck = () => {
     if (currentClassStudents.length === 0) {
-      alert("Không có học sinh trong lớp hiện tại để check đi học.");
+      alert("Không có trainer trong lớp hiện tại để check đi học.");
       return;
     }
     const defaultStatuses: Record<string, AttendanceStatus> = {};
@@ -2137,7 +2268,7 @@ const App: React.FC = () => {
     setAttendanceStatuses({});
 
     if (hatchedNames.length > 0 && !releaseEventToShow) {
-      setHatchSuccessMessage(`Tin vui chấn động triều đình! Trứng của ${hatchedNames.join(', ')} đã nở sau điểm chuyên cần. 🥚🐣`);
+      setHatchSuccessMessage(`Tin vui! Trứng của ${hatchedNames.join(', ')} đã nở sau điểm chuyên cần. 🥚🐣`);
       setShowHatchModal(true);
     }
 
@@ -2153,7 +2284,7 @@ const App: React.FC = () => {
   const handleRandom = (forceMode?: 'solo' | 'battle') => {
     setBattleResultSummary(null);
     const available = presentStudents;
-    if (available.length === 0) return alert("Không có học sinh nào hiện diện.");
+    if (available.length === 0) return alert("Không có trainer nào hiện diện.");
     
     // Pick mode: if forceMode provided use it, otherwise randomly pick solo or battle (50/50 if available.length >= 2)
     const mode = forceMode || (available.length >= 2 ? (Math.random() > 0.5 ? 'battle' : 'solo') : 'solo');
@@ -2369,7 +2500,7 @@ const App: React.FC = () => {
 
     const candidates = students.filter(s => selectedStudentIds.includes(s.id) && !s.isAbsent);
     if (candidates.length === 0) {
-      alert("Vui lòng chọn ít nhất 1 học sinh đang hiện diện để quay Vòng quay may mắn.");
+      alert("Vui lòng chọn ít nhất 1 trainer đang hiện diện để quay Vòng quay may mắn.");
       return;
     }
 
@@ -2382,19 +2513,64 @@ const App: React.FC = () => {
     setShowLuckyWheelModal(true);
   };
 
+  const stopLuckyWheelSpinSound = () => {
+    if (luckyWheelSpinAudioRef.current) {
+      luckyWheelSpinAudioRef.current.pause();
+      luckyWheelSpinAudioRef.current.currentTime = 0;
+      luckyWheelSpinAudioRef.current = null;
+    }
+    if (luckyWheelSpinSynthRef.current) {
+      window.clearInterval(luckyWheelSpinSynthRef.current.intervalId);
+      luckyWheelSpinSynthRef.current.context.close().catch(() => {});
+      luckyWheelSpinSynthRef.current = null;
+    }
+  };
+
+  const playLuckyWheelSpinSound = () => {
+    stopLuckyWheelSpinSound();
+
+    const spinSoundUrl = wheelSpinSoundUrl.trim() || DEFAULT_WHEEL_SPIN_SOUND_URL;
+    const spinAudio = new Audio(spinSoundUrl);
+    spinAudio.loop = true;
+    spinAudio.volume = 0.55;
+    luckyWheelSpinAudioRef.current = spinAudio;
+    spinAudio.play().catch(() => {});
+
+    const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextCtor) return;
+
+    const context = new AudioContextCtor();
+    const playTick = () => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = 'triangle';
+      oscillator.frequency.value = 360 + Math.random() * 520;
+      gain.gain.setValueAtTime(0.0001, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.085);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.09);
+    };
+    playTick();
+    const intervalId = window.setInterval(playTick, 115);
+    luckyWheelSpinSynthRef.current = { context, intervalId };
+  };
+
   const startLuckyWheelSpin = () => {
     if (isLuckyWheelSpinning) return;
 
     const candidates = students.filter(s => luckyWheelCandidateIds.includes(s.id) && !s.isAbsent);
     if (candidates.length === 0) {
-      alert("Không còn học sinh hợp lệ trong lượt quay này.");
+      alert("Không còn trainer hợp lệ trong lượt quay này.");
       return;
     }
 
     const chosenStudent = candidates[getRandomIndex(candidates.length)];
     const validRewards = getLuckyWheelValidRewards(chosenStudent);
     if (validRewards.length === 0) {
-      alert("Không có phần thưởng/hình phạt hợp lệ cho học sinh này. Vui lòng kiểm tra Customize Vòng quay may mắn.");
+      alert("Không có phần thưởng/hình phạt hợp lệ cho trainer này. Vui lòng kiểm tra Customize Vòng quay may mắn.");
       return;
     }
 
@@ -2412,16 +2588,7 @@ const App: React.FC = () => {
     setIsLuckyWheelSpinning(true);
     setLuckyWheelRotation(startRotation);
 
-    if (luckyWheelSpinAudioRef.current) {
-      luckyWheelSpinAudioRef.current.pause();
-      luckyWheelSpinAudioRef.current = null;
-    }
-    const spinSoundUrl = wheelSpinSoundUrl.trim() || DEFAULT_WHEEL_SPIN_SOUND_URL;
-    const spinAudio = new Audio(spinSoundUrl);
-    spinAudio.loop = true;
-    spinAudio.volume = 0.55;
-    luckyWheelSpinAudioRef.current = spinAudio;
-    spinAudio.play().catch(() => {});
+    playLuckyWheelSpinSound();
 
     window.requestAnimationFrame(() => {
       if (luckyWheelRef.current) {
@@ -2440,11 +2607,7 @@ const App: React.FC = () => {
     });
 
     window.setTimeout(() => {
-      if (luckyWheelSpinAudioRef.current) {
-        luckyWheelSpinAudioRef.current.pause();
-        luckyWheelSpinAudioRef.current.currentTime = 0;
-        luckyWheelSpinAudioRef.current = null;
-      }
+      stopLuckyWheelSpinSound();
       if (wheelFinishSoundUrl.trim()) {
         new Audio(wheelFinishSoundUrl).play().catch(() => {});
       }
@@ -2554,7 +2717,7 @@ const App: React.FC = () => {
         return s;
       });
 
-      resultMsg = `🤝 TRẬN BATTLE HÒA NHAU!\n\nCả 2 học sĩ đều được cộng điểm và bảo toàn HP cho Pokemon.`;
+      resultMsg = `🤝 TRẬN BATTLE HÒA NHAU!\n\nCả 2 trainer đều được cộng điểm và bảo toàn HP cho Pokemon.`;
     }
 
     if (battleProgressMessages.length > 0) {
@@ -2710,7 +2873,7 @@ const App: React.FC = () => {
     setSelectedFusionPetDexIds([]);
     setProfileTab('pet');
     new Audio(posSoundUrl).play().catch(() => {});
-    alert(`🔮 HỢP NHẤT THÀNH CÔNG!\n\nĐã dung hợp các Pokémon để tái sinh linh thú [${getPokemonDisplayName(fusedPet)}] tích tụ ${combinedSkills.length} tuyệt chiêu thần bí!`);
+    alert(`🔮 HỢP NHẤT THÀNH CÔNG!\n\nĐã dung hợp các Pokémon để tạo Pokémon mới [${getPokemonDisplayName(fusedPet)}] với ${combinedSkills.length} skill đã giữ lại!`);
   };
 
   const playDiceSound = () => {
@@ -3085,50 +3248,6 @@ const App: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  // Pyramid Building Logic
-  const pyramidTiers = useMemo(() => {
-    if (students.length === 0) return [];
-    
-    // Sort all unique rank levels in descending order
-    const levels = Array.from(new Set([...ranksMale, ...ranksFemale].map(r => r.level))).sort((a, b) => b - a);
-    
-    // Special Tier 1: Absolute Top Male and Female
-    const topMale = students.filter(s => s.gender === Gender.MALE).sort((a,b) => b.points - a.points)[0];
-    const topFemale = students.filter(s => s.gender === Gender.FEMALE).sort((a,b) => b.points - a.points)[0];
-    
-    const tiers = [];
-    
-    // Tier 1: King and Queen
-    tiers.push({
-      level: 999, // Special ID
-      title: "Hoàng Đế & Hoàng Hậu",
-      students: [topMale, topFemale].filter(Boolean) as Student[]
-    });
-
-    // Other Tiers based on remaining ranks
-    levels.forEach(lvl => {
-      const lvlStudents = students.filter(s => {
-        const rank = getRank(s.points, s.gender);
-        // Exclude the absolute tops from their rank tiers to avoid duplication at the top
-        const isAbsoluteTop = (s.id === topMale?.id || s.id === topFemale?.id);
-        return rank.level === lvl && !isAbsoluteTop;
-      });
-
-      if (lvlStudents.length > 0) {
-        // Find titles for this level to display
-        const mTitle = ranksMale.find(r => r.level === lvl)?.title;
-        const fTitle = ranksFemale.find(r => r.level === lvl)?.title;
-        tiers.push({
-          level: lvl,
-          title: `${mTitle} / ${fTitle}`,
-          students: lvlStudents.sort((a,b) => b.points - a.points)
-        });
-      }
-    });
-
-    return tiers;
-  }, [students, ranksMale, ranksFemale]);
-
   // Skill Sidebar Logic
   const getSidebarData = () => {
     if (selectedStudentIds.length !== 1) return null;
@@ -3190,7 +3309,7 @@ const App: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#5d4037] flex flex-col items-center justify-center text-white font-sans">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#D4AF37] mb-4"></div>
-        <p className="font-royal uppercase tracking-widest text-xs text-[#D4AF37]">Đang kết nối triều đình...</p>
+        <p className="font-royal uppercase tracking-widest text-xs text-[#D4AF37]">Đang kết nối Trainer Hub...</p>
       </div>
     );
   }
@@ -3205,22 +3324,21 @@ const App: React.FC = () => {
         <div className="fixed bottom-8 right-8 w-16 h-16 border-b-4 border-r-4 border-red-800 opacity-60 rounded-br-xl pointer-events-none" />
 
         <div className="w-full max-w-lg bg-white rounded-[40px] border-8 border-red-800 shadow-2xl p-8 sm:p-12 text-center relative overflow-hidden flex flex-col items-center space-y-6">
-          {/* Imperial Crest Icon */}
+          {/* Trainer Hub Icon */}
           <div className="w-24 h-24 bg-red-800 rounded-full flex items-center justify-center text-5xl shadow-lg border-4 border-amber-400 select-none animate-bounce duration-1000">
-            🏮
+            ◉
           </div>
 
           <div className="space-y-2">
-            <h1 className="text-4xl font-royal text-red-800 font-extrabold uppercase tracking-tight">Cung Đình Học Đường</h1>
-            <p className="text-[11px] font-black uppercase tracking-[0.2em] text-amber-600">Vietnamese Imperial Academy</p>
+            <h1 className="text-4xl font-royal text-red-800 font-extrabold uppercase tracking-tight">Pokemon Trainer Hub</h1>
+            <p className="text-[11px] font-black uppercase tracking-[0.2em] text-amber-600">Classroom Adventure System</p>
           </div>
 
           <div className="w-full h-px bg-gradient-to-r from-transparent via-amber-400 to-transparent my-6" />
 
           <p className="text-sm font-sans text-stone-600 leading-relaxed max-w-sm">
-            Chào mừng quý Quan trường ghé thăm học điện Hoàng gia. 
-            Vui lòng thực hiện <strong>Đăng Nhập</strong> để đồng hành cùng sỹ tử, 
-            đồng bộ học lục và thăng hoa tiên thú triều đình.
+            Đăng nhập để quản lý trainer, đồng bộ dữ liệu lớp học,
+            theo dõi Pokémon đồng hành và tổ chức các hoạt động học tập.
           </p>
 
           <div className="pt-2 w-full">
@@ -3308,7 +3426,7 @@ const App: React.FC = () => {
           }}
         >
           {[
-            { id: 'school' as Screen, icon: '🏛️', label: 'Kim Tự Tháp' },
+            { id: 'plaza' as Screen, icon: '◎', label: 'Trainer Plaza' },
             { id: 'class' as Screen, icon: '📚', label: 'Lớp Học' },
             { id: 'settings' as Screen, icon: '⚙️', label: 'Cài Đặt' }
           ].map(item => (
@@ -3329,7 +3447,7 @@ const App: React.FC = () => {
           <button
             type="button"
             onClick={() => setShowUserModal(true)}
-            title="Thành viên triều đình"
+            title="Tài khoản giáo viên"
             className="grid h-14 w-14 place-items-center overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-300 to-amber-600 shadow-lg transition-all hover:scale-110 active:scale-95"
           >
             <img
@@ -3352,47 +3470,97 @@ const App: React.FC = () => {
 
       {/* MAIN CONTENT */}
       <main className="max-w-7xl mx-auto p-6">
-        {currentScreen === 'school' && (
-          <div className="space-y-12 py-12 animate-in fade-in duration-500">
-            <h2 className="text-4xl font-royal text-center text-red-800 uppercase tracking-widest mb-16">Kim Tự Tháp Triều Đình</h2>
-            
-            <div className="flex flex-col items-center gap-16">
-              {pyramidTiers.map((tier, idx) => (
-                <div key={tier.level} className="w-full flex flex-col items-center">
-                  <div className="mb-4 text-center">
-                    <span className="text-[10px] font-black uppercase tracking-[0.4em] opacity-40">{tier.title}</span>
+        {currentScreen === 'plaza' && (
+          <div className="py-8 animate-in fade-in duration-500">
+            {(() => {
+              const mood = getWeatherMood(trainerWeather);
+              const plazaStudents = students.slice(0, 28);
+              const positions = [
+                [8, 18], [20, 32], [34, 20], [48, 36], [62, 22], [76, 34], [16, 58],
+                [30, 70], [44, 56], [58, 72], [72, 58], [84, 70], [12, 80], [88, 48]
+              ];
+              const conversations = ['Ready for battle?', 'Trade skills?', 'Great training!', 'Nice Pokémon!', 'Let’s practice!'];
+
+              return (
+                <section className={`relative min-h-[720px] overflow-hidden rounded-[40px] border-2 border-white/80 shadow-2xl ${
+                  mood === 'night'
+                    ? 'bg-gradient-to-b from-slate-950 via-indigo-950 to-emerald-950'
+                    : mood === 'rain'
+                      ? 'bg-gradient-to-b from-slate-500 via-sky-700 to-emerald-800'
+                      : mood === 'fog'
+                        ? 'bg-gradient-to-b from-slate-200 via-sky-100 to-emerald-200'
+                        : 'bg-gradient-to-b from-sky-300 via-cyan-100 to-emerald-300'
+                }`}>
+                  <div className="absolute inset-x-0 bottom-0 h-[55%] bg-[radial-gradient(ellipse_at_center,#53c878_0%,#25945a_48%,#127048_100%)]" />
+                  <div className="absolute bottom-[16%] left-1/2 h-40 w-[115%] -translate-x-1/2 rounded-[50%] bg-stone-100/70 blur-[1px]" />
+                  <div className="absolute bottom-[21%] left-1/2 h-28 w-[70%] -translate-x-1/2 rounded-[50%] bg-stone-200/80" />
+                  <div className="absolute left-[8%] top-[18%] h-24 w-24 rounded-full bg-white/35 blur-xl" />
+                  <div className="absolute right-[12%] top-[12%] h-28 w-28 rounded-full bg-amber-200/70 shadow-[0_0_70px_rgba(251,191,36,0.65)]" />
+                  {mood === 'night' && <div className="absolute inset-0 bg-slate-950/45" />}
+                  {mood === 'rain' && (
+                    <div className="absolute inset-0 opacity-45 [background-image:linear-gradient(115deg,rgba(255,255,255,0.45)_0_1px,transparent_1px_12px)] [background-size:18px_36px] animate-pulse" />
+                  )}
+                  <div className="relative z-10 flex flex-wrap items-start justify-between gap-4 p-6">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.28em] text-white/80">Trainer Plaza</p>
+                      <h2 className="font-royal text-4xl text-white drop-shadow">Pokemon Trainer Plaza</h2>
+                      <p className="mt-1 text-sm font-bold text-white/80">Không gian sống của các trainer và Pokémon trong lớp.</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/50 bg-white/25 px-4 py-3 text-right text-white shadow-lg backdrop-blur-md">
+                      <p className="text-[10px] font-black uppercase tracking-wider">{trainerLocation?.label || 'Weather location'}</p>
+                      <p className="mt-1 text-2xl font-black">{trainerWeather ? `${trainerWeather.temperature}°C` : '--°C'}</p>
+                      <p className="text-xs font-bold">{trainerWeather ? trainerWeather.label : weatherLoading ? 'Đang tải thời tiết' : 'Chưa có dữ liệu thời tiết'}</p>
+                    </div>
                   </div>
-                  <div className="flex flex-wrap justify-center gap-6">
-                    {tier.students.map(s => {
-                      const rank = getRank(s.points, s.gender);
-                      const isTop = tier.level === 999;
+
+                  {plazaStudents.length === 0 ? (
+                    <div className="relative z-10 mx-auto mt-40 max-w-md rounded-[32px] border border-white/70 bg-white/80 p-8 text-center shadow-xl backdrop-blur-xl">
+                      <p className="text-sm font-black text-teal-900">Chưa có trainer nào trong lớp.</p>
+                    </div>
+                  ) : (
+                    plazaStudents.map((student, index) => {
+                      const [left, top] = positions[index % positions.length];
+                      const pet = student.pet;
                       return (
-                        <div key={s.id} className="text-center group">
-                          <div className="relative inline-block mb-3">
-                            <img 
-                              src={rank.avatar || 'https://api.dicebear.com/7.x/bottts/svg'} 
-                              className={`rounded-full border-[#D4AF37] shadow-xl object-cover transition-transform group-hover:scale-110 ${isTop ? 'w-40 h-40 border-8' : 'w-20 h-20 border-4'}`} 
-                            />
-                            {isTop && <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-5xl">{s.gender === Gender.MALE ? '👑' : '👸'}</span>}
-                            <div className="absolute -bottom-2 -right-2 bg-red-800 text-white text-[10px] w-8 h-8 rounded-full flex items-center justify-center font-bold border-2 border-white">{s.points}</div>
+                        <div
+                          key={student.id}
+                          className="absolute z-20 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1 transition-transform duration-300 hover:scale-110"
+                          style={{ left: `${left}%`, top: `${top}%` }}
+                        >
+                          <div className="relative">
+                            <StudentAvatar student={student} className="h-16 w-16 rounded-2xl border-4 border-white shadow-xl" />
+                            {pet && (
+                              <img
+                                src={getPokemonArtworkUrl(pet)}
+                                onError={event => handlePokemonArtworkError(event, pet)}
+                                className="absolute -right-8 -top-7 h-14 w-14 object-contain drop-shadow-xl"
+                                alt={getPokemonDisplayName(pet)}
+                                referrerPolicy="no-referrer"
+                              />
+                            )}
                           </div>
-                          <p className={`font-bold text-red-800 ${isTop ? 'text-xl' : 'text-xs'}`}>{s.name}</p>
-                          <p className="text-[8px] opacity-40 font-black uppercase">{s.className}</p>
+                          <div className="rounded-full border border-white/70 bg-white/85 px-3 py-1 text-center shadow-lg backdrop-blur-md">
+                            <p className="max-w-[120px] truncate text-[10px] font-black text-teal-950">{student.name}</p>
+                          </div>
+                          {index % 3 === 0 && (
+                            <div className="rounded-2xl border border-white/70 bg-white/80 px-3 py-1 text-[9px] font-black text-slate-700 shadow-md">
+                              {conversations[index % conversations.length]}
+                            </div>
+                          )}
                         </div>
                       );
-                    })}
-                  </div>
-                  {idx < pyramidTiers.length - 1 && <div className="mt-12 w-32 h-1 bg-red-800/10 rounded-full" />}
-                </div>
-              ))}
-            </div>
+                    })
+                  )}
+                </section>
+              );
+            })()}
           </div>
         )}
 
         {currentScreen === 'class' && (
           <div className="animate-in fade-in duration-300">
             <div className="flex flex-wrap gap-4 mb-8 bg-gray-50 p-4 rounded-2xl border items-center">
-              <input type="text" placeholder="Tìm kiếm học sĩ..." className="flex-1 p-3 rounded-xl border outline-none focus:ring-2 ring-red-800/20" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+              <input type="text" placeholder="Tìm kiếm trainer..." className="flex-1 p-3 rounded-xl border outline-none focus:ring-2 ring-red-800/20" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
 
               <div className="relative">
                 <select
@@ -3400,7 +3568,7 @@ const App: React.FC = () => {
                   onChange={e => setFilterClass(e.target.value)}
                   className="bg-white text-red-950 border-2 border-amber-200 px-4 py-3 pr-9 rounded-xl outline-none font-black text-xs appearance-none hover:border-amber-400 transition-all cursor-pointer shadow-sm"
                 >
-                  <option value="Tất cả">Tất cả học sĩ</option>
+                  <option value="Tất cả">Tất cả trainer</option>
                   {classes.filter(c => c !== 'Tất cả').map(c => (
                     <option key={c} value={c}>{c}</option>
                   ))}
@@ -3425,7 +3593,7 @@ const App: React.FC = () => {
               </button>
 
               <button onClick={() => {
-                const name = prompt("Họ tên học sĩ:");
+                const name = prompt("Họ tên trainer:");
                 if (!name) return;
                 const gender = confirm("Nhấn OK cho Nam, Cancel cho Nữ") ? Gender.MALE : Gender.FEMALE;
                 const cls = prompt("Lớp:", filterClass !== 'Tất cả' ? filterClass : 'Mới');
@@ -3433,12 +3601,12 @@ const App: React.FC = () => {
                   id: Date.now().toString(), 
                   name, 
                   gender, 
-                  className: cls || 'Triều Đình', 
+                  className: cls || 'Pokemon Class', 
                   points: 0, 
                   history: [],
                   egg: createEgg('normal')
                 }]);
-              }} className="bg-red-800 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-red-900 transition-all">+ Thêm Học Sĩ</button>
+              }} className="bg-red-800 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-red-900 transition-all">+ Thêm Trainer</button>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -3493,7 +3661,7 @@ const App: React.FC = () => {
         {currentScreen === 'profile' && editingStudent && (
           <div className="bg-white p-6 sm:p-10 rounded-3xl border shadow-2xl max-w-4xl mx-auto space-y-8 animate-in slide-in-from-right-4 duration-500">
             <div className="flex justify-between items-center border-b pb-4">
-              <h2 className="text-2xl sm:text-3xl font-royal text-red-800">📜 Hồ Sơ Học Sĩ</h2>
+              <h2 className="text-2xl sm:text-3xl font-royal text-red-800">Hồ Sơ Trainer</h2>
               <button 
                 onClick={() => setCurrentScreen('class')} 
                 className="text-sm font-black uppercase text-gray-400 hover:text-red-800 transition-colors"
@@ -3533,11 +3701,7 @@ const App: React.FC = () => {
               <div className="space-y-8 animate-in fade-in duration-300">
                 <div className="flex flex-col sm:flex-row gap-8 items-center sm:items-start">
                   <div className="relative shrink-0 flex flex-col items-center gap-2">
-                    <img 
-                      referrerPolicy="no-referrer"
-                      src={editingStudent.customAvatar || getRank(editingStudent.points, editingStudent.gender).avatar || 'https://api.dicebear.com/7.x/bottts/svg'} 
-                      className="w-32 h-32 rounded-full border-4 border-[#D4AF37] object-cover shadow-lg" 
-                    />
+                    <StudentAvatar student={editingStudent} className="w-32 h-32 rounded-full border-4 border-[#D4AF37] shadow-lg" />
                     <div className="flex flex-col items-center gap-1.5 w-full">
                       <label className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] px-3 py-1.5 rounded-xl cursor-pointer shadow-sm transition-all text-center w-full uppercase">
                         📷 Đổi Ảnh Riêng
@@ -3564,7 +3728,7 @@ const App: React.FC = () => {
                       <input className="w-full border p-3 rounded-xl bg-gray-50 focus:ring-2 ring-red-800/10 outline-none text-sm font-bold" value={editingStudent.name} onChange={e => setEditingStudent({...editingStudent, name: e.target.value})} />
                     </div>
                     <div>
-                      <label className="text-[10px] uppercase font-bold text-gray-400 block mb-1">Lớp/Cung Trấn</label>
+                      <label className="text-[10px] uppercase font-bold text-gray-400 block mb-1">Lớp / Team</label>
                       <input className="w-full border p-3 rounded-xl bg-gray-50 focus:ring-2 ring-red-800/10 outline-none text-sm font-bold" value={editingStudent.className} onChange={e => setEditingStudent({...editingStudent, className: e.target.value})} />
                     </div>
                     <div>
@@ -3586,7 +3750,7 @@ const App: React.FC = () => {
                     setShowSkillModal(true); 
                   }} className="flex-1 bg-red-800 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-red-900 hover:scale-[1.01] transition-all">Ban Thưởng / Phạt</button>
                   <button onClick={() => {
-                    if (window.confirm("Xóa học sĩ này?")) {
+                    if (window.confirm("Xóa trainer này?")) {
                       setStudents(prev => prev.filter(s => s.id !== editingStudent.id));
                       setCurrentScreen('class');
                     }
@@ -3660,7 +3824,7 @@ const App: React.FC = () => {
                               if (isHatching && updatedEgg.status === 'egg') {
                                 updatedEgg.status = 'hatched';
                                 updatedPet = createPokemonPetFromDexId(currentEgg.assignedDexId);
-                                setHatchSuccessMessage(`Tuyệt diệu! Quả trứng của học sĩ ${editingStudent.name} đã chính thức nở ra Pokémon cưng ${getPokemonDisplayName(updatedPet)}! 🎉`);
+                                setHatchSuccessMessage(`Tuyệt vời! Quả trứng của trainer ${editingStudent.name} đã chính thức nở ra Pokémon ${getPokemonDisplayName(updatedPet)}! 🎉`);
                                 setShowHatchModal(true);
                               }
 
@@ -3712,7 +3876,7 @@ const App: React.FC = () => {
 
                                  setEditingStudent(currentMerged);
                                  setStudents(prev => prev.map(s => s.id === editingStudent.id ? currentMerged : s));
-                                 setHatchSuccessMessage(`Tin vui chấn động! Pokémon ${getPokemonDisplayName(updatedPet)} đã tung cánh bay ra từ vỏ trứng chào mừng học sĩ ${editingStudent.name}! 🐣💖`);
+                                 setHatchSuccessMessage(`Tin vui! Pokémon ${getPokemonDisplayName(updatedPet)} đã nở từ trứng và sẵn sàng đồng hành cùng trainer ${editingStudent.name}! 🐣`);
                                  setShowHatchModal(true);
                                }}
                                className="w-full bg-green-600 text-white font-bold py-4 rounded-2xl shadow-xl hover:bg-green-700 animate-bounce transition-all uppercase text-xs"
@@ -3730,9 +3894,9 @@ const App: React.FC = () => {
                         <div className="text-left font-sans">
                           <h4 className="font-royal text-lg text-amber-900 flex items-center gap-2">
                             <span>🦁</span>
-                            <span>Danh Sách Linh Thú Sở Hữu ({editingStudent.pets.length})</span>
+                            <span>Danh Sách Pokémon Sở Hữu ({editingStudent.pets.length})</span>
                           </h4>
-                          <p className="text-xs text-amber-950/60 font-sans mt-0.5">Triệu tập linh thú hộ thân đã nở trước đó để tiếp tục phục vụ đồng hành.</p>
+                          <p className="text-xs text-amber-950/60 font-sans mt-0.5">Chọn Pokémon đã nở trước đó để tiếp tục đồng hành.</p>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[220px] overflow-y-auto pr-2 custom-scrollbar">
                           {editingStudent.pets.map(p => (
@@ -3788,7 +3952,7 @@ const App: React.FC = () => {
                       <div className="flex-1 w-full space-y-4">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-100 pb-3">
                           <div>
-                            <span className="bg-amber-100 text-amber-900 font-black text-[9px] px-2.5 py-0.5 rounded-full uppercase tracking-wider block w-max">Linh Thú Hộ Mệnh Đương Trực</span>
+                            <span className="bg-amber-100 text-amber-900 font-black text-[9px] px-2.5 py-0.5 rounded-full uppercase tracking-wider block w-max">Pokémon Đồng Hành</span>
                             <h3 className="text-2xl font-black text-amber-950 mt-1">{getPokemonDisplayName(editingStudent.pet)}</h3>
                             <p className="text-xs font-bold text-amber-900/60">
                               {editingStudent.pet.speciesName || editingStudent.pet.name} · Lv.{editingStudent.pet.level || 1}
@@ -3924,9 +4088,9 @@ const App: React.FC = () => {
                         <div className="text-left border-b pb-2 font-sans">
                           <h4 className="font-royal text-lg text-amber-900 flex items-center gap-2">
                             <span>🦁</span>
-                            <span>Trại Linh Thú Sở Hữu ({editingStudent.pets.length})</span>
+                            <span>Pokémon Đã Sở Hữu ({editingStudent.pets.length})</span>
                           </h4>
-                          <p className="text-xs text-amber-950/60 mt-0.5">Lựa chọn một Linh thú tâm đầu ý hợp từ nông trại cổ tích để kề vai sát cánh kề vai cùng học sĩ diện kiến triều học.</p>
+                          <p className="text-xs text-amber-950/60 mt-0.5">Lựa chọn một Pokémon trong bộ sưu tập để đồng hành cùng trainer.</p>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[190px] overflow-y-auto pr-2 custom-scrollbar font-sans">
                           {editingStudent.pets.map(p => {
@@ -4005,9 +4169,9 @@ const App: React.FC = () => {
                     <div className="space-y-4 pt-4">
                       <h4 className="font-royal text-xl text-purple-900 border-b pb-2 flex items-center gap-2">
                         <span>🎓</span>
-                        <span>Viện Bảo Học Pháp Bảo (Skills Đường Pet)</span>
+                        <span>Pokémon Skill Lab</span>
                       </h4>
-                      <p className="text-xs text-purple-800/70 font-sans">Huấn luyện tuyện kỹ học đường cho linh thú để trợ oai đổi đề, né câu, đỡ phạt oanh tạc triều học!</p>
+                      <p className="text-xs text-purple-800/70 font-sans">Huấn luyện skill cho Pokémon để hỗ trợ trainer trong các hoạt động học tập.</p>
                       
                       <div className="space-y-2 max-h-[420px] overflow-y-auto pr-2 custom-scrollbar font-sans font-[Inter]">
                         {petSkills.map(sk => {
@@ -4018,7 +4182,7 @@ const App: React.FC = () => {
                                 {sk.icon}
                               </div>
                               <div className="flex-1 min-w-0 text-left">
-                                <span className="text-[8px] tracking-widest font-black uppercase text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">Bí kíp học sĩ</span>
+                                <span className="text-[8px] tracking-widest font-black uppercase text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">Trainer skill</span>
                                 <h5 className="font-extrabold text-sm text-gray-800 mt-1">{sk.name}</h5>
                                 <p className="text-xs text-gray-400 mt-0.5 italic leading-relaxed">{sk.description}</p>
                               </div>
@@ -4049,7 +4213,7 @@ const App: React.FC = () => {
                 <div className="bg-purple-50/70 border-2 border-purple-200 rounded-[32px] p-6 space-y-4">
                   <div className="flex items-center justify-between gap-4 border-b border-purple-200 pb-4">
                     <div>
-                      <h3 className="text-2xl font-royal text-purple-900 uppercase tracking-wider">🔮 Hợp nhất Linh thú</h3>
+                      <h3 className="text-2xl font-royal text-purple-900 uppercase tracking-wider">🔮 Hợp nhất Pokémon</h3>
                       <p className="text-xs text-purple-950/70 mt-1">Chọn đúng 2 Pokémon để hợp nhất thành 1 Pokémon mới. Hai Pokémon cũ sẽ biến mất, còn các skills đã mua và vẫn còn hiệu lực sẽ được giữ lại.</p>
                     </div>
                     <span className="shrink-0 bg-white text-purple-900 border border-purple-200 px-3 py-1.5 rounded-full text-xs font-black">
@@ -4061,7 +4225,7 @@ const App: React.FC = () => {
                     <div className="bg-white border border-purple-100 rounded-3xl p-8 text-center space-y-3">
                       <div className="text-5xl">🥚</div>
                       <p className="text-sm font-black text-purple-900">Cần tối thiểu 2 Pokémon để hợp nhất.</p>
-                      <p className="text-xs text-purple-700/70">Hãy ấp thêm trứng hoặc chọn lại linh thú sở hữu trước khi dung hợp.</p>
+                      <p className="text-xs text-purple-700/70">Hãy ấp thêm trứng hoặc chọn lại Pokémon sở hữu trước khi dung hợp.</p>
                     </div>
                   ) : (
                     <>
@@ -4113,7 +4277,7 @@ const App: React.FC = () => {
                         onClick={() => handleFuseSelectedPokemons(editingStudent.id)}
                         className="w-full bg-purple-700 hover:bg-purple-800 disabled:opacity-40 disabled:hover:bg-purple-700 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-wider shadow-lg transition-all"
                       >
-                        🔮 Hợp Nhất 2 Linh Thú Đã Chọn
+                        🔮 Hợp Nhất 2 Pokémon Đã Chọn
                       </button>
                     </>
                   )}
@@ -4125,7 +4289,44 @@ const App: React.FC = () => {
 
         {currentScreen === 'settings' && (
           <div className="animate-in slide-in-from-bottom-4 duration-500 space-y-8 pb-12">
-            <h2 className="text-3xl font-royal text-red-800 text-center uppercase">Thiết Lập Triều Đình</h2>
+            <h2 className="text-3xl font-royal text-teal-800 text-center uppercase">Trainer Settings</h2>
+
+            <SettingsSection id="weather" icon="☀️" title="Weather Plaza" subtitle="Cài vị trí để Trainer Plaza đổi nắng, mưa hoặc trời tối theo thời tiết thật." collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
+              <div className="grid grid-cols-1 gap-4 rounded-[32px] border border-sky-100 bg-sky-50/60 p-5 md:grid-cols-[1fr_auto_auto]">
+                <input
+                  value={weatherLocationInput}
+                  onChange={event => {
+                    setWeatherLocationInput(event.target.value);
+                    localStorage.setItem('trainer_weather_location_input', event.target.value);
+                  }}
+                  placeholder="Nhập thành phố hoặc địa chỉ, ví dụ: Hanoi"
+                  className="rounded-2xl border border-sky-200 bg-white px-4 py-3 text-sm font-bold text-sky-950 outline-none focus:ring-4 focus:ring-sky-100"
+                />
+                <button
+                  onClick={refreshWeatherByAddress}
+                  disabled={weatherLoading}
+                  className="rounded-2xl bg-sky-700 px-5 py-3 text-xs font-black uppercase tracking-wider text-white shadow-lg hover:bg-sky-800 disabled:opacity-50"
+                >
+                  Update Weather
+                </button>
+                <button
+                  onClick={refreshWeatherByBrowserLocation}
+                  disabled={weatherLoading}
+                  className="rounded-2xl border border-sky-200 bg-white px-5 py-3 text-xs font-black uppercase tracking-wider text-sky-800 shadow-sm hover:bg-sky-50 disabled:opacity-50"
+                >
+                  Auto Location
+                </button>
+                <div className="md:col-span-3 text-xs font-bold text-sky-900/70">
+                  {weatherLoading
+                    ? 'Đang cập nhật thời tiết...'
+                    : weatherError
+                      ? weatherError
+                      : trainerWeather
+                        ? `${trainerLocation?.label || 'Vị trí'} · ${trainerWeather.label} · ${trainerWeather.temperature}°C · cập nhật ${new Date(trainerWeather.updatedAt).toLocaleTimeString('vi-VN')}`
+                        : 'Chưa có dữ liệu thời tiết.'}
+                </div>
+              </div>
+            </SettingsSection>
 
             <SettingsSection id="sound" icon="🔊" title="Cài Đặt Âm Thanh" subtitle="Youtube hoặc audio URL cho cộng điểm, trừ điểm, timer và vòng quay may mắn." collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
@@ -4162,59 +4363,6 @@ const App: React.FC = () => {
               </button>
             </SettingsSection>
 
-            <SettingsSection id="ranks" icon="👑" title="Cấp Bậc" subtitle="Tùy chỉnh cấp bậc Nam/Nữ, điểm tối thiểu và avatar từng rank." collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {[Gender.FEMALE, Gender.MALE].map(g => (
-                  <div key={g} className="bg-gray-50 p-6 rounded-[32px] border shadow-sm">
-                    <div className="flex justify-between items-center mb-6">
-                      <h4 className="text-xl font-royal text-red-800">Cấp Bậc {g}</h4>
-                      <button onClick={() => {
-                        const title = prompt("Tên rank mới:");
-                        if (!title) return;
-                        const pts = parseInt(prompt("Điểm tối thiểu:") || '0');
-                        const newRank: RankInfo = { id: Date.now().toString(), level: 0, title, minPoints: pts, maxPoints: pts + 49, color: 'text-gray-600', avatar: '' };
-                        if (g === Gender.MALE) setRanksMale(prev => [...prev, newRank].sort((a,b) => a.minPoints - b.minPoints));
-                        else setRanksFemale(prev => [...prev, newRank].sort((a,b) => a.minPoints - b.minPoints));
-                      }} className="bg-red-800 text-white w-10 h-10 rounded-full font-bold">+</button>
-                    </div>
-                    <div className="space-y-4">
-                      {(g === Gender.MALE ? ranksMale : ranksFemale).map(r => (
-                        <div key={r.id} className="flex items-center gap-4 bg-white p-4 rounded-3xl border hover:border-red-800/30 transition-all shadow-sm">
-                          <div className="w-14 h-14 shrink-0 border-2 border-gray-100 rounded-full overflow-hidden relative group">
-                            <img src={r.avatar || 'https://api.dicebear.com/7.x/bottts/svg'} className="w-full h-full object-cover" />
-                            <label className="absolute inset-0 cursor-pointer bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-[8px] text-white font-black uppercase text-center p-1">
-                              Tải Ảnh
-                              <input type="file" accept="image/*" onChange={e => handleAvatarUpload(g, r.id, e)} className="hidden" />
-                            </label>
-                          </div>
-                          <div className="flex-1 space-y-2 min-w-0">
-                            <input className="w-full text-base font-bold border-b-2 border-transparent focus:border-red-800 outline-none transition-all" value={r.title} onChange={e => {
-                              const updater = (prev: RankInfo[]) => prev.map(x => x.id === r.id ? {...x, title: e.target.value} : x);
-                              if (g === Gender.MALE) setRanksMale(updater); else setRanksFemale(updater);
-                            }} />
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] uppercase font-bold opacity-30">Min:</span>
-                              <input type="number" className="w-20 text-xs border p-1 rounded" value={r.minPoints} onChange={e => {
-                                const pts = parseInt(e.target.value) || 0;
-                                const updater = (prev: RankInfo[]) => prev.map(x => x.id === r.id ? {...x, minPoints: pts} : x);
-                                if (g === Gender.MALE) setRanksMale(updater); else setRanksFemale(updater);
-                              }} />
-                            </div>
-                          </div>
-                          <button onClick={() => {
-                            if (confirm('Xóa cấp bậc này?')) {
-                              const updater = (prev: RankInfo[]) => prev.filter(x => x.id !== r.id);
-                              if (g === Gender.MALE) setRanksMale(updater); else setRanksFemale(updater);
-                            }
-                          }} className="text-gray-300 hover:text-red-600 transition-colors">🗑️</button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </SettingsSection>
-
             <SettingsSection id="skills" icon="✨" title="Công Trạng" subtitle="Tùy chỉnh điểm cộng/trừ trong bảng feedback." collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
               <div className="flex justify-end">
                 <button onClick={() => {
@@ -4240,7 +4388,7 @@ const App: React.FC = () => {
               </div>
             </SettingsSection>
 
-            <SettingsSection id="petSkills" icon="⚡" title="Skills Pokémon" subtitle="Tùy chỉnh tuyệt chiêu Pokémon, giá mua và mô tả hiển thị trong hồ sơ học sinh." collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
+            <SettingsSection id="petSkills" icon="⚡" title="Skills Pokémon" subtitle="Tùy chỉnh skill Pokémon, giá mua và mô tả hiển thị trong hồ sơ trainer." collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
               <div className="flex flex-wrap justify-end gap-3">
                 <button onClick={addPetSkill} className="bg-indigo-700 text-white px-6 py-2 rounded-xl font-bold text-xs">+ Thêm Pokémon Skill</button>
                 <button onClick={() => { if(confirm('Khôi phục danh sách Pokémon skills mặc định?')) setPetSkills(DEFAULT_PET_SKILLS); }} className="bg-indigo-100 text-indigo-900 px-6 py-2 rounded-xl font-bold text-xs border border-indigo-200">Khôi Phục Mặc Định</button>
@@ -4264,7 +4412,7 @@ const App: React.FC = () => {
               <div className="bg-white p-6 rounded-3xl border border-emerald-100 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
                 <div className="text-left space-y-1">
                   <h4 className="font-black text-emerald-950 text-sm uppercase">Reset Level Pokémon</h4>
-                  <p className="text-xs text-emerald-800/80 font-sans">Tất cả Pokémon của học sinh sẽ trở về Level 1, XP/Mastery về 0.</p>
+                  <p className="text-xs text-emerald-800/80 font-sans">Tất cả Pokémon của trainer sẽ trở về Level 1, XP/Mastery về 0.</p>
                 </div>
                 <button
                   onClick={handleResetPokemonLevels}
@@ -4373,11 +4521,11 @@ const App: React.FC = () => {
               </div>
             </SettingsSection>
 
-            <SettingsSection id="data" icon="☁️" title="Dữ Liệu Quốc Gia" subtitle="Import/export danh sách học sinh và JSON backup toàn bộ hệ thống." className="bg-red-50 p-6 sm:p-12 rounded-[50px] border-4 border-red-100 text-center space-y-8" collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
+            <SettingsSection id="data" icon="☁️" title="Dữ liệu" subtitle="Import/export danh sách trainer và JSON backup toàn bộ hệ thống." className="bg-red-50 p-6 sm:p-12 rounded-[50px] border-4 border-red-100 text-center space-y-8" collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
               <div className="bg-white p-6 rounded-3xl border border-red-100 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="text-left space-y-1">
-                  <h4 className="font-bold text-red-950 text-sm">Danh Sách Học Sĩ (CSV / Excel)</h4>
-                  <p className="text-xs text-red-800/80 font-sans">Nhập danh sách học sinh từ bảng CSV.</p>
+                  <h4 className="font-bold text-red-950 text-sm">Danh Sách Trainer (CSV / Excel)</h4>
+                  <p className="text-xs text-red-800/80 font-sans">Nhập danh sách trainer từ bảng CSV.</p>
                 </div>
                 <div className="flex flex-wrap justify-center gap-4 shrink-0 font-sans">
                   <button onClick={() => {
@@ -4386,7 +4534,7 @@ const App: React.FC = () => {
                     const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
                     const link = document.createElement("a");
                     link.href = URL.createObjectURL(blob);
-                    link.setAttribute("download", "mau_csv_cung_dinh.csv");
+                    link.setAttribute("download", "mau_csv_trainer.csv");
                     link.click();
                   }} className="bg-white border-2 border-red-800 text-red-800 p-3 px-6 rounded-2xl font-bold hover:bg-red-800 hover:text-white transition-all text-xs shadow-md">Mẫu Excel 📥</button>
                   <label className="bg-red-800 hover:bg-red-950 text-white p-3 px-6 rounded-2xl font-bold cursor-pointer transition-all text-xs shadow-md">
@@ -4400,7 +4548,7 @@ const App: React.FC = () => {
                         const lines = text.split('\n').filter(l => l.trim());
                         const newItems: Student[] = lines.slice(1).map(line => {
                           const [name, cls, pts, gender] = line.split(',').map(v => v.trim());
-                          return { id: Math.random().toString(36).substr(2, 9), name: name || 'Ẩn danh', className: cls || 'Học sĩ', points: parseInt(pts) || 0, gender: gender === 'Nữ' ? Gender.FEMALE : Gender.MALE, history: [], egg: createEgg('normal') };
+                          return { id: Math.random().toString(36).substr(2, 9), name: name || 'Ẩn danh', className: cls || 'Pokemon Class', points: parseInt(pts) || 0, gender: gender === 'Nữ' ? Gender.FEMALE : Gender.MALE, history: [], egg: createEgg('normal') };
                         });
                         setStudents(prev => [...prev, ...newItems]);
                         alert("Đã tiếp nhận!");
@@ -4413,7 +4561,7 @@ const App: React.FC = () => {
               <div className="bg-white p-6 rounded-3xl border border-red-100 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="text-left space-y-1">
                   <h4 className="font-bold text-red-950 text-sm">Sao Lưu Toàn Bộ Hệ Thống (JSON Backup)</h4>
-                  <p className="text-xs text-red-800/80 font-sans">Bao gồm học sinh, điểm, lịch sử, linh thú, công trạng, Pokémon skills, âm thanh và cấp bậc.</p>
+                  <p className="text-xs text-red-800/80 font-sans">Bao gồm trainer, điểm, lịch sử, Pokémon, công trạng, Pokémon skills và âm thanh.</p>
                 </div>
                 <div className="flex flex-wrap justify-center gap-4 shrink-0 font-sans">
                   <button onClick={handleExportJSON} className="bg-[#D4AF37] hover:bg-amber-600 text-white p-3 px-6 rounded-2xl font-bold transition-all text-xs shadow-md">Export JSON Backup 📦</button>
@@ -4439,10 +4587,7 @@ const App: React.FC = () => {
                 <>
                   <div className="flex items-center justify-center gap-4 mb-6">
                     <div className="relative">
-                      <img 
-                        src={sidebarData.student.customAvatar || sidebarData.rank.avatar || 'https://api.dicebear.com/7.x/bottts/svg'} 
-                        className="w-28 h-28 rounded-full border-4 border-white shadow-xl object-cover" 
-                      />
+                      <StudentAvatar student={sidebarData.student} className="w-28 h-28 rounded-full border-4 border-white shadow-xl" />
                       <div className="absolute top-0 right-0 bg-green-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold border-2 border-white shadow-md text-xs">
                         {sidebarData.student.points}
                       </div>
@@ -4490,7 +4635,7 @@ const App: React.FC = () => {
                   </div>
                 </>
               ) : (
-                <div className="text-center py-20 opacity-20 italic">Chọn 1 học sĩ để xem chi tiết thăng hạng...</div>
+                <div className="text-center py-20 opacity-20 italic">Chọn 1 trainer để xem chi tiết...</div>
               )}
             </div>
 
@@ -4587,10 +4732,7 @@ const App: React.FC = () => {
 
                 <div className="flex items-center justify-center gap-6 mb-6">
                   <div className="relative">
-                    <img 
-                      src={randomStudent.customAvatar || getRank(randomStudent.points, randomStudent.gender).avatar || 'https://api.dicebear.com/7.x/bottts/svg'} 
-                      className="w-28 h-28 sm:w-32 sm:h-32 rounded-full border-4 border-red-800 shadow-xl object-cover" 
-                    />
+                    <StudentAvatar student={randomStudent} className="w-28 h-28 sm:w-32 sm:h-32 rounded-full border-4 border-red-800 shadow-xl" />
                     <div className="absolute top-0 right-0 bg-red-800 text-white w-9 h-9 rounded-full flex items-center justify-center font-bold border-2 border-white shadow text-sm">
                       {randomStudent.points}
                     </div>
@@ -4673,7 +4815,7 @@ const App: React.FC = () => {
             {randomMode === 'battle' && battleStudentA && battleStudentB && (
               <>
                 <h2 className="text-2xl font-royal text-red-800 mb-2 uppercase tracking-wider">⚡ Trận Quyết Đấu (Battle) ⚡</h2>
-                <p className="text-xs text-gray-500 mb-6 italic">Nhập điểm hoặc bấm nút cộng điểm cho mỗi học sinh. Người thắng được cộng HP theo điểm chênh lệch, người thua bị trừ HP chênh lệch!</p>
+                <p className="text-xs text-gray-500 mb-6 italic">Nhập điểm hoặc bấm nút cộng điểm cho mỗi trainer. Người thắng được cộng HP theo điểm chênh lệch, người thua bị trừ HP chênh lệch!</p>
 
                 {battleResultSummary ? (
                   <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-6 rounded-3xl border-4 border-amber-400 space-y-6 shadow-xl animate-in zoom-in-95 duration-200 text-left">
@@ -4746,12 +4888,9 @@ const App: React.FC = () => {
                       {/* STUDENT A CARD */}
                       <div className="bg-amber-50/80 p-4 rounded-3xl border-2 border-amber-300 flex flex-col items-center">
                         <span className="bg-amber-500 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider mb-2">
-                          Học Sĩ A
+                          Trainer A
                         </span>
-                        <img 
-                          src={battleStudentA.customAvatar || getRank(battleStudentA.points, battleStudentA.gender).avatar || 'https://api.dicebear.com/7.x/bottts/svg'} 
-                          className="w-20 h-20 rounded-full border-4 border-amber-400 object-cover shadow-md mb-2" 
-                        />
+                        <StudentAvatar student={battleStudentA} className="w-20 h-20 rounded-full border-4 border-amber-400 shadow-md mb-2" />
                         <h4 className="font-extrabold text-gray-800 text-base">{battleStudentA.name}</h4>
                         <p className="text-[10px] text-gray-500 font-bold mb-2">Hào quang: {battleStudentA.points}đ</p>
 
@@ -4790,12 +4929,9 @@ const App: React.FC = () => {
                       {/* STUDENT B CARD */}
                       <div className="bg-purple-50/80 p-4 rounded-3xl border-2 border-purple-300 flex flex-col items-center">
                         <span className="bg-purple-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider mb-2">
-                          Học Sĩ B
+                          Trainer B
                         </span>
-                        <img 
-                          src={battleStudentB.customAvatar || getRank(battleStudentB.points, battleStudentB.gender).avatar || 'https://api.dicebear.com/7.x/bottts/svg'} 
-                          className="w-20 h-20 rounded-full border-4 border-purple-400 object-cover shadow-md mb-2" 
-                        />
+                        <StudentAvatar student={battleStudentB} className="w-20 h-20 rounded-full border-4 border-purple-400 shadow-md mb-2" />
                         <h4 className="font-extrabold text-gray-800 text-base">{battleStudentB.name}</h4>
                         <p className="text-[10px] text-gray-500 font-bold mb-2">Hào quang: {battleStudentB.points}đ</p>
 
@@ -4898,7 +5034,7 @@ const App: React.FC = () => {
                       ? 'Đang quay trong 10 giây...'
                       : luckyWheelMode === 'ludo-finish'
                         ? 'Cán đích Cá Ngựa: 60% quà tốt, 40% quà thử thách.'
-                        : 'Bấm quay để bắt đầu chọn học sĩ và phần thưởng ngẫu nhiên.'}
+                        : 'Bấm quay để bắt đầu chọn trainer và phần thưởng ngẫu nhiên.'}
                   </p>
                 </div>
               </div>
@@ -4998,12 +5134,9 @@ const App: React.FC = () => {
                   {!isLuckyWheelSpinning && luckyWheelResult && (
                     <div className="w-full space-y-5 animate-in zoom-in-95 duration-300">
                       <div className="flex flex-col items-center gap-3">
-                        <img
-                          src={luckyWheelResult.student.customAvatar || getRank(luckyWheelResult.student.points, luckyWheelResult.student.gender).avatar || 'https://api.dicebear.com/7.x/bottts/svg'}
-                          className="w-24 h-24 rounded-full border-4 border-fuchsia-700 object-cover shadow-xl"
-                        />
+                        <StudentAvatar student={luckyWheelResult.student} className="w-24 h-24 rounded-full border-4 border-fuchsia-700 shadow-xl" />
                         <div>
-                          <p className="text-[10px] font-black uppercase tracking-[0.25em] text-fuchsia-700">Học sĩ trúng thưởng</p>
+                          <p className="text-[10px] font-black uppercase tracking-[0.25em] text-fuchsia-700">Trainer trúng thưởng</p>
                           <h3 className="text-3xl font-black text-gray-900">{luckyWheelResult.student.name}</h3>
                           <p className="text-xs font-bold text-gray-400 uppercase">{luckyWheelResult.student.className}</p>
                         </div>
@@ -5081,7 +5214,7 @@ const App: React.FC = () => {
 
            <div className="flex-1 p-6 sm:p-10 overflow-y-auto max-w-7xl mx-auto w-full space-y-8">
              <div className="bg-red-50 p-6 rounded-3xl border border-red-200 text-center space-y-4">
-               <h3 className="text-xl font-bold text-red-900">Chọn Số Lượng Học Sinh Tối Đa Trong 1 Nhóm:</h3>
+               <h3 className="text-xl font-bold text-red-900">Chọn Số Lượng Trainer Tối Đa Trong 1 Nhóm:</h3>
                <div className="flex flex-wrap justify-center gap-3">
                   {[2, 3, 4, 5, 6, 7, 8].map(n => (
                     <button 
@@ -5102,12 +5235,12 @@ const App: React.FC = () => {
                     <div key={idx} className="p-6 rounded-3xl border-2 border-red-200 bg-gradient-to-b from-red-50/50 to-white shadow-md">
                        <p className="font-black text-red-800 text-lg mb-4 border-b-2 border-red-200 pb-2 flex justify-between items-center">
                          <span>NHÓM {idx+1}</span>
-                         <span className="text-xs bg-red-800 text-white px-3 py-1 rounded-full font-sans">{g.length} Học Sinh</span>
+                         <span className="text-xs bg-red-800 text-white px-3 py-1 rounded-full font-sans">{g.length} Trainer</span>
                        </p>
                        <div className="space-y-2.5">
                          {g.map(s => (
                            <div key={s.id} className="flex items-center gap-3 bg-white p-3 rounded-2xl border border-gray-100 shadow-xs">
-                             <img src={s.customAvatar || getRank(s.points, s.gender).avatar || 'https://api.dicebear.com/7.x/bottts/svg'} className="w-10 h-10 rounded-full border border-red-200 object-cover" />
+                             <StudentAvatar student={s} className="w-10 h-10 rounded-full border border-red-200" />
                              <span className="text-xl md:text-2xl font-bold text-gray-800">{s.name}</span>
                            </div>
                          ))}
@@ -5174,8 +5307,8 @@ const App: React.FC = () => {
             <div className="flex items-center gap-3">
               <span className="text-3xl">🐴</span>
               <div>
-                <h2 className="text-xl font-royal uppercase tracking-widest text-amber-300">Đường Đua Cá Ngựa Triều Đình (50 Ô)</h2>
-                <p className="text-[10px] text-amber-200">Lớp {activeLudoClassName || 'Chưa chọn'} - chỉ học sinh cùng lớp đua với nhau.</p>
+                <h2 className="text-xl font-royal uppercase tracking-widest text-amber-300">Đường Đua Cá Ngựa (50 Ô)</h2>
+                <p className="text-[10px] text-amber-200">Lớp {activeLudoClassName || 'Chưa chọn'} - chỉ trainer cùng lớp đua với nhau.</p>
               </div>
             </div>
             <button onClick={() => { setBattleLudoQueue([]); setShowLudoModal(false); }} className="bg-amber-800 hover:bg-amber-700 text-white px-5 py-2 rounded-xl font-bold text-xs uppercase tracking-wider border border-amber-600">
@@ -5187,7 +5320,7 @@ const App: React.FC = () => {
             {/* Left side: Interactive Board */}
             <div className="flex-1 bg-white p-6 rounded-3xl border-4 border-amber-300 shadow-xl space-y-6">
               <div className="flex flex-col sm:flex-row justify-between gap-3 sm:items-center border-b border-amber-200 pb-3">
-                <h3 className="font-extrabold text-amber-950 text-base">Bàn Cờ Hoàng Gia (Ô 0 đến 49)</h3>
+                <h3 className="font-extrabold text-amber-950 text-base">Bàn Cờ Trainer (Ô 0 đến 49)</h3>
                 <div className="flex flex-wrap items-center gap-2">
                   <select
                     value={activeLudoClassName}
@@ -5203,7 +5336,7 @@ const App: React.FC = () => {
                       <option key={cls} value={cls}>{cls}</option>
                     ))}
                   </select>
-                  <span className="text-xs font-bold text-amber-800 bg-amber-100 px-3 py-1 rounded-full">Tổng sỹ tử: {ludoRaceStudents.length}</span>
+                  <span className="text-xs font-bold text-amber-800 bg-amber-100 px-3 py-1 rounded-full">Tổng trainer: {ludoRaceStudents.length}</span>
                 </div>
               </div>
 
@@ -5240,11 +5373,7 @@ const App: React.FC = () => {
                             transition={{ type: "spring", stiffness: 400, damping: 25 }}
                             className="relative group"
                           >
-                            <img 
-                              src={st.customAvatar || getRank(st.points, st.gender).avatar || 'https://api.dicebear.com/7.x/bottts/svg'} 
-                              className="w-8 h-8 sm:w-9 sm:h-9 rounded-full border-2 border-amber-900 shadow-md object-cover ring-2 ring-amber-300 transform group-hover:scale-125 transition-transform duration-200" 
-                              alt={st.name}
-                            />
+                            <StudentAvatar student={st} className="w-8 h-8 sm:w-9 sm:h-9 rounded-full border-2 border-amber-900 shadow-md ring-2 ring-amber-300 transform group-hover:scale-125 transition-transform duration-200" />
                             <div className="absolute -bottom-1 -right-1 bg-amber-900 text-amber-100 text-[8px] font-black px-1 rounded-full border border-white shadow-xs max-w-[36px] truncate">
                               {st.name.split(' ').pop()}
                             </div>
@@ -5259,7 +5388,7 @@ const App: React.FC = () => {
               {/* Logs area - High contrast & readable */}
               <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-4 rounded-2xl border-2 border-amber-300 shadow-md space-y-2">
                 <p className="text-amber-950 font-black text-xs uppercase tracking-wider border-b border-amber-200 pb-1 flex items-center gap-1.5">
-                  <span>📜</span> Nhật Ký Đua Cá Ngựa Triều Đình:
+                  <span>📜</span> Nhật ký đua cá ngựa:
                 </p>
                 <div className="max-h-48 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
                   {ludoLogs.map((log, i) => (
@@ -5296,7 +5425,7 @@ const App: React.FC = () => {
                     </div>
                   ) : (
                     <>
-                      <label className="text-[10px] font-black uppercase text-amber-900 block">Chọn Học Sinh Trả Lời Đúng:</label>
+                      <label className="text-[10px] font-black uppercase text-amber-900 block">Chọn Trainer Trả Lời Đúng:</label>
                       <select
                         value={ludoActiveStudent?.id || ''}
                         onChange={e => {
@@ -5305,7 +5434,7 @@ const App: React.FC = () => {
                         }}
                         className="w-full border-2 border-amber-300 p-3 rounded-2xl text-sm font-bold outline-none bg-amber-50/50"
                       >
-                        <option value="">-- Chọn học sinh lắc xí ngầu --</option>
+                        <option value="">-- Chọn trainer lắc xí ngầu --</option>
                         {ludoRaceStudents.map(s => (
                           <option key={s.id} value={s.id}>{s.name} ({s.className}) - Ô {ludoPositions[s.id] || 0}</option>
                         ))}
@@ -5315,7 +5444,7 @@ const App: React.FC = () => {
 
                   {ludoActiveStudent && (
                     <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 flex items-center gap-3">
-                      <img src={ludoActiveStudent.customAvatar || getRank(ludoActiveStudent.points, ludoActiveStudent.gender).avatar || 'https://api.dicebear.com/7.x/bottts/svg'} className="w-12 h-12 rounded-full border-2 border-amber-600 object-cover" />
+                      <StudentAvatar student={ludoActiveStudent} className="w-12 h-12 rounded-full border-2 border-amber-600" />
                       <div>
                         <h4 className="font-extrabold text-amber-950 text-sm">{ludoActiveStudent.name}</h4>
                         <p className="text-[10px] font-bold text-amber-800">Đang ở ô: {ludoPositions[ludoActiveStudent.id] || 0} / 50</p>
@@ -5373,10 +5502,7 @@ const App: React.FC = () => {
             </div>
 
             <div className="flex items-center justify-center gap-3 bg-white/70 p-3 rounded-2xl border border-amber-200 shadow-xs">
-              <img 
-                src={ludoEventPopup.actor.customAvatar || getRank(ludoEventPopup.actor.points, ludoEventPopup.actor.gender).avatar || 'https://api.dicebear.com/7.x/bottts/svg'} 
-                className="w-12 h-12 rounded-full border-2 border-amber-600 object-cover" 
-              />
+              <StudentAvatar student={ludoEventPopup.actor} className="w-12 h-12 rounded-full border-2 border-amber-600" />
               <div className="text-left">
                 <p className="text-xs font-black text-amber-950">{ludoEventPopup.actor.name}</p>
                 <p className="text-[10px] text-amber-800 font-bold">Vị trí hiện tại: Ô {ludoPositions[ludoEventPopup.actor.id] || 0}</p>
@@ -5407,7 +5533,7 @@ const App: React.FC = () => {
             <div className="flex justify-center">
               <button onClick={() => setEdict(null)} className="bg-[#5d4037] text-white px-16 py-5 rounded-full font-bold uppercase tracking-[0.2em] hover:scale-110 transition-transform shadow-2xl">Khấu Đầu Tuân Chỉ</button>
             </div>
-            <div className="mt-12 text-center text-[10px] opacity-40 uppercase font-black tracking-widest">Phụng Thiên Thừa Vận - Hoàng Đế Chiếu Viết</div>
+            <div className="mt-12 text-center text-[10px] opacity-40 uppercase font-black tracking-widest">Trainer Hub Announcement</div>
           </div>
         </div>
       )}
@@ -5419,7 +5545,7 @@ const App: React.FC = () => {
             {/* Ambient burst bg */}
             <div className="absolute inset-0 bg-radial-gradient from-amber-300/30 via-transparent to-transparent pointer-events-none" />
             
-            <h3 className="text-3xl font-royal text-amber-800 uppercase tracking-widest">🐣 Linh Thú Thức Giấc 🐣</h3>
+            <h3 className="text-3xl font-royal text-amber-800 uppercase tracking-widest">🐣 Pokémon Thức Giấc 🐣</h3>
             
             <div className="relative inline-block py-6">
               <div className="absolute inset-0 bg-amber-400/20 rounded-full blur-3xl animate-pulse" />
@@ -5444,7 +5570,7 @@ const App: React.FC = () => {
               </button>
             </div>
             
-            <div className="text-[9px] uppercase font-bold text-amber-900/40 tracking-wider">Cung điện Hoàng Gia - Bảo học Linh thú đồng hành</div>
+            <div className="text-[9px] uppercase font-bold text-amber-900/40 tracking-wider">Trainer Hub - Pokémon Companion</div>
           </div>
         </div>
       )}
@@ -5476,7 +5602,7 @@ const App: React.FC = () => {
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-teal-100 bg-gradient-to-r from-teal-50 via-cyan-50 to-emerald-50 p-5">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.28em] text-teal-600">Class Shop</p>
-                <h2 className="font-royal text-3xl text-teal-950">Shop Linh Thú & Tuyệt Chiêu</h2>
+                <h2 className="font-royal text-3xl text-teal-950">Shop Pokémon & Skill</h2>
               </div>
               <button
                 onClick={() => {
@@ -5499,7 +5625,7 @@ const App: React.FC = () => {
                 <thead>
                   <tr>
                     <th className="sticky left-0 top-0 z-40 w-[220px] min-w-[220px] rounded-2xl bg-teal-950 px-3 py-3 text-left font-black uppercase text-white shadow-[10px_0_22px_rgba(15,118,110,0.22)]">
-                      Học sinh
+                      Trainer
                     </th>
                     <th className="sticky top-0 z-20 w-[150px] min-w-[150px] rounded-2xl bg-teal-900 px-3 py-3 text-center font-black uppercase text-white">
                       Trứng thường
@@ -5525,17 +5651,11 @@ const App: React.FC = () => {
                   {currentClassStudents.map(student => {
                     const selection = shopSelections[student.id] || { skills: [] };
                     const ownedSkillIds = student.pet?.skills || [];
-                    const rank = getRank(student.points, student.gender);
                     return (
                       <tr key={student.id}>
                         <td className="sticky left-0 z-30 w-[220px] min-w-[220px] rounded-2xl border border-teal-100 bg-white p-3 shadow-[10px_0_22px_rgba(15,118,110,0.16)]">
                           <div className="flex items-center gap-3">
-                            <img
-                              src={student.customAvatar || rank.avatar || 'https://api.dicebear.com/7.x/bottts/svg'}
-                              className="h-10 w-10 shrink-0 rounded-xl border-2 border-white object-cover shadow-sm"
-                              alt={student.name}
-                              referrerPolicy="no-referrer"
-                            />
+                            <StudentAvatar student={student} className="h-10 w-10 shrink-0 rounded-xl border-2 border-white shadow-sm" />
                             <div className="min-w-0">
                               <p className="truncate font-black text-teal-950">{student.name}</p>
                               <p className="mt-0.5 truncate text-[10px] font-bold text-teal-700/70">{student.points}đ Hào Quang · {student.pet ? getPokemonDisplayName(student.pet) : 'Đang ấp trứng'}</p>
@@ -5637,7 +5757,7 @@ const App: React.FC = () => {
                   <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
                     <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">Ví dụ</p>
                     <p className="mt-1 text-sm font-bold leading-relaxed text-slate-700">
-                      Nếu học sinh mua {selectedShopSkill.name}, skill sẽ được gắn vào Pokémon đang đồng hành. Khi đến lượt cần dùng, giáo viên mở hồ sơ Linh thú của học sinh và kích hoạt skill đó theo mô tả ở trên.
+                      Nếu trainer mua {selectedShopSkill.name}, skill sẽ được gắn vào Pokémon đang đồng hành. Khi đến lượt cần dùng, giáo viên mở hồ sơ Pokémon của trainer và kích hoạt skill đó theo mô tả ở trên.
                     </p>
                   </div>
                 </div>
@@ -5690,7 +5810,7 @@ const App: React.FC = () => {
           <div className="bg-rose-50 max-w-2xl w-full rounded-[36px] border-[8px] border-rose-700 p-6 sm:p-8 shadow-[0_0_90px_rgba(190,18,60,0.38)] text-center space-y-6 relative overflow-hidden">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(244,63,94,0.18),transparent_36%)] pointer-events-none" />
             <div className="relative z-10 space-y-4">
-              <p className="text-[10px] font-black uppercase tracking-[0.25em] text-rose-800">Linh thú rời đội hình</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.25em] text-rose-800">Pokémon rời đội hình</p>
               <h3 className="text-3xl sm:text-4xl font-royal text-rose-950 uppercase">Pokémon đã rời đội hình</h3>
 
               <div className="bg-white/90 rounded-[28px] border border-rose-200 p-5 shadow-inner">
@@ -5793,7 +5913,7 @@ const App: React.FC = () => {
                       alt="Review Avatar"
                     />
                   </div>
-                  <h2 className="text-xl font-royal font-bold uppercase tracking-wide">Danh Tính Sỹ Phu</h2>
+                  <h2 className="text-xl font-royal font-bold uppercase tracking-wide">Tài khoản giáo viên</h2>
                   <p className="text-[10px] text-amber-300 font-mono mt-0.5 opacity-80">{user.email}</p>
                 </>
               ) : (
@@ -5801,7 +5921,7 @@ const App: React.FC = () => {
                   <div className="w-12 h-12 bg-amber-400 rounded-full flex items-center justify-center text-2xl mx-auto mb-2 border-2 border-amber-200">
                     🏮
                   </div>
-                  <h2 className="text-xl font-royal font-bold uppercase tracking-wide">Đăng Nhập Sỹ Phu</h2>
+                  <h2 className="text-xl font-royal font-bold uppercase tracking-wide">Đăng nhập</h2>
                   <p className="text-[10px] text-amber-200 mt-0.5">Kết nối tài khoản để tự động sao lưu đám mây</p>
                 </div>
               )}
@@ -5878,7 +5998,7 @@ const App: React.FC = () => {
                         setProfileSaving(true);
                         try {
                           await updateUserProfile(editingDisplayName, editingPhotoURL);
-                          alert("Đã lưu thông tin sỹ phu thành công!");
+                        alert("Đã lưu thông tin tài khoản thành công!");
                           setShowUserModal(false);
                         } catch (err) {
                           alert("Có lỗi xảy ra: " + (err instanceof Error ? err.message : String(err)));
@@ -5897,7 +6017,7 @@ const App: React.FC = () => {
                         onClick={() => setConfirmLogout(true)}
                         className="w-full bg-[#fcf8e3] hover:bg-amber-100/50 text-amber-800 border border-amber-300 py-2.5 rounded-xl font-bold uppercase text-[9px] tracking-widest transition-all text-center leading-normal"
                       >
-                        🚪 Đăng Xuất Khỏi Triều Đình
+                        Đăng xuất
                       </button>
                     ) : (
                       <div className="flex gap-2 w-full animate-in fade-in duration-200">

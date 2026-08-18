@@ -1,5 +1,6 @@
 import React from 'react';
 import { Gender, RankInfo, Student } from '../types';
+import { StudentAvatar } from './StudentAvatar';
 
 export type HomeworkStatus = 'done' | 'not-yet' | 'missing';
 
@@ -46,7 +47,7 @@ export const HomeworkCheckModal: React.FC<HomeworkCheckModalProps> = ({
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.25em] text-emerald-100">Homework Check</p>
             <h2 className="text-2xl font-black uppercase tracking-wide">Check BTVN</h2>
-            <p className="text-xs font-bold text-emerald-100">Ngày {lessonDateKey} · {students.length} học sinh đang có mặt</p>
+            <p className="text-xs font-bold text-emerald-100">Ngày {lessonDateKey} · {students.length} trainer đang có mặt</p>
           </div>
           <button
             onClick={onClose}
@@ -58,14 +59,14 @@ export const HomeworkCheckModal: React.FC<HomeworkCheckModalProps> = ({
 
         <div className="max-h-[62vh] overflow-y-auto p-4 custom-scrollbar">
           {students.length === 0 ? (
-            <p className="py-16 text-center text-sm font-bold text-gray-400">Không có học sinh đang hiện diện để check BTVN.</p>
+            <p className="py-16 text-center text-sm font-bold text-gray-400">Không có trainer đang hiện diện để check BTVN.</p>
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {students.map(student => {
                 const lessonKey = `${student.className}:${lessonDateKey}`;
                 const alreadyChecked = student.pokemonProgress?.lastHomeworkLessonKey === lessonKey;
                 const status = alreadyChecked ? 'locked' : (statuses[student.id] || 'done');
-                const rank = getRank(student.points, student.gender);
+                getRank(student.points, student.gender);
 
                 return (
                   <div
@@ -83,12 +84,7 @@ export const HomeworkCheckModal: React.FC<HomeworkCheckModalProps> = ({
                             : 'border-emerald-200 bg-emerald-50 hover:border-emerald-500'
                     }`}
                   >
-                    <img
-                      referrerPolicy="no-referrer"
-                      src={student.customAvatar || rank.avatar || 'https://api.dicebear.com/7.x/bottts/svg'}
-                      className="h-12 w-12 shrink-0 rounded-2xl border border-white object-cover shadow-sm"
-                      alt={student.name}
-                    />
+                    <StudentAvatar student={student} className="h-12 w-12 shrink-0 rounded-2xl border border-white shadow-sm" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-black text-gray-900">{student.name}</p>
                       <p className="truncate text-[10px] font-bold text-gray-500">{student.className}</p>

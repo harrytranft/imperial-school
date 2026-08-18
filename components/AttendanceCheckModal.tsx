@@ -1,5 +1,6 @@
 import React from 'react';
 import { AttendanceStatus, Gender, RankInfo, Student } from '../types';
+import { StudentAvatar } from './StudentAvatar';
 
 interface AttendanceCheckModalProps {
   students: Student[];
@@ -46,7 +47,7 @@ export const AttendanceCheckModal: React.FC<AttendanceCheckModalProps> = ({
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.25em] text-sky-100">Attendance Check</p>
             <h2 className="text-2xl font-black uppercase tracking-wide">Check đi học</h2>
-            <p className="text-xs font-bold text-sky-100">Ngày {lessonDateKey} · {students.length} học sinh trong lớp</p>
+            <p className="text-xs font-bold text-sky-100">Ngày {lessonDateKey} · {students.length} trainer trong lớp</p>
           </div>
           <button
             onClick={onClose}
@@ -58,14 +59,14 @@ export const AttendanceCheckModal: React.FC<AttendanceCheckModalProps> = ({
 
         <div className="max-h-[62vh] overflow-y-auto p-4 custom-scrollbar">
           {students.length === 0 ? (
-            <p className="py-16 text-center text-sm font-bold text-gray-400">Không có học sinh trong lớp hiện tại.</p>
+            <p className="py-16 text-center text-sm font-bold text-gray-400">Không có trainer trong lớp hiện tại.</p>
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {students.map(student => {
                 const lessonKey = lessonKeyFor(student);
                 const alreadyChecked = student.pokemonProgress?.lastAttendanceLessonKey === lessonKey;
                 const status = statuses[student.id] || student.attendanceStatus || (student.isAbsent ? 'absent' : 'present');
-                const rank = getRank(student.points, student.gender);
+                getRank(student.points, student.gender);
 
                 return (
                   <div
@@ -74,12 +75,7 @@ export const AttendanceCheckModal: React.FC<AttendanceCheckModalProps> = ({
                       alreadyChecked ? 'border-gray-200 bg-gray-50 opacity-70' : statusStyles[status]
                     }`}
                   >
-                    <img
-                      referrerPolicy="no-referrer"
-                      src={student.customAvatar || rank.avatar || 'https://api.dicebear.com/7.x/bottts/svg'}
-                      className="h-12 w-12 shrink-0 rounded-2xl border border-white object-cover shadow-sm"
-                      alt={student.name}
-                    />
+                    <StudentAvatar student={student} className="h-12 w-12 shrink-0 rounded-2xl border border-white shadow-sm" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-black text-gray-900">{student.name}</p>
                       <p className="truncate text-[10px] font-bold text-gray-500">{student.className}</p>

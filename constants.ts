@@ -14,20 +14,20 @@ export const DEFAULT_RANKS_MALE: RankInfo[] = [
   { id: 'm1', level: -1, title: 'Nô tài', minPoints: -999, maxPoints: -1, color: 'text-gray-500', avatar: '' },
   { id: 'm2', level: 0, title: 'Thường dân', minPoints: 0, maxPoints: 49, color: 'text-green-600', avatar: '' },
   { id: 'm3', level: 1, title: 'Thị vệ', minPoints: 50, maxPoints: 99, color: 'text-blue-600', avatar: '' },
-  { id: 'm4', level: 2, title: 'Quan Văn/Võ', minPoints: 100, maxPoints: 149, color: 'text-cyan-700', avatar: '' },
-  { id: 'm5', level: 3, title: 'Đại thần', minPoints: 150, maxPoints: 199, color: 'text-indigo-700', avatar: '' },
+  { id: 'm4', level: 2, title: 'Trainer Pro', minPoints: 100, maxPoints: 149, color: 'text-cyan-700', avatar: '' },
+  { id: 'm5', level: 3, title: 'Ace Trainer', minPoints: 150, maxPoints: 199, color: 'text-indigo-700', avatar: '' },
   { id: 'm6', level: 4, title: 'Thân vương', minPoints: 200, maxPoints: 249, color: 'text-orange-600', avatar: '' },
-  { id: 'm7', level: 5, title: 'Hoàng đế', minPoints: 250, maxPoints: 99999, color: 'text-red-600 font-bold', avatar: '' },
+  { id: 'm7', level: 5, title: 'Champion Trainer', minPoints: 250, maxPoints: 99999, color: 'text-red-600 font-bold', avatar: '' },
 ];
 
 export const DEFAULT_RANKS_FEMALE: RankInfo[] = [
   { id: 'f1', level: -1, title: 'Nô tì', minPoints: -999, maxPoints: -1, color: 'text-gray-500', avatar: '' },
   { id: 'f2', level: 0, title: 'Thường dân', minPoints: 0, maxPoints: 49, color: 'text-green-600', avatar: '' },
   { id: 'f3', level: 1, title: 'Tú nữ', minPoints: 50, maxPoints: 99, color: 'text-pink-600', avatar: '' },
-  { id: 'f4', level: 2, title: 'Cung phi', minPoints: 100, maxPoints: 149, color: 'text-red-500', avatar: '' },
+  { id: 'f4', level: 2, title: 'Trainer Pro', minPoints: 100, maxPoints: 149, color: 'text-red-500', avatar: '' },
   { id: 'f5', level: 3, title: 'Quý phi', minPoints: 150, maxPoints: 199, color: 'text-rose-600', avatar: '' },
-  { id: 'f6', level: 4, title: 'Hoàng thái hậu', minPoints: 200, maxPoints: 249, color: 'text-orange-600', avatar: '' },
-  { id: 'f7', level: 5, title: 'Hoàng hậu', minPoints: 250, maxPoints: 99999, color: 'text-red-600 font-bold', avatar: '' },
+  { id: 'f6', level: 4, title: 'Elite Trainer', minPoints: 200, maxPoints: 249, color: 'text-orange-600', avatar: '' },
+  { id: 'f7', level: 5, title: 'Champion Trainer', minPoints: 250, maxPoints: 99999, color: 'text-red-600 font-bold', avatar: '' },
 ];
 
 export const DEFAULT_SKILLS: Skill[] = [
@@ -110,20 +110,20 @@ export const DEFAULT_LUCKY_WHEEL_REWARDS: LuckyWheelReward[] = [
 ];
 
 export const DEFAULT_LUDO_TILES: Record<number, { tileIndex: number; title: string; desc: string; icon: string; type: 'portal' | 'curse' | 'treasure' | 'monster' | 'restart'; value?: number }> = {
-  3: { tileIndex: 3, title: '🚀 Tên Lửa Hoàng Gia', desc: 'Phóng vọt 4 bước về phía trước!', icon: '🚀', type: 'portal', value: 4 },
+  3: { tileIndex: 3, title: '🚀 Turbo Boost', desc: 'Phóng vọt 4 bước về phía trước!', icon: '🚀', type: 'portal', value: 4 },
   5: { tileIndex: 5, title: '🌀 Cổng Dịch Chuyển', desc: 'Cuồng phong thần tốc kéo bạn tiến nhanh 3 bước!', icon: '🌀', type: 'portal', value: 3 },
-  8: { tileIndex: 8, title: '👹 Quái Vật Cung Đình', desc: 'Gặp Quái vật hung tợn! Lượt sau phải tung Xúc sắc 6 điểm mới tiêu diệt được!', icon: '👹', type: 'monster' },
+  8: { tileIndex: 8, title: '⚠️ Chướng Ngại Vật', desc: 'Gặp chướng ngại vật! Lượt sau phải tung xúc xắc 6 điểm mới vượt qua!', icon: '⚠️', type: 'monster' },
   12: { tileIndex: 12, title: '⚡ Giày Thần Kỳ', desc: 'Nhảy vọt 3 bước thần tốc!', icon: '⚡', type: 'portal', value: 3 },
   14: { tileIndex: 14, title: '📜 Bùa Chú Thoái Lùi', desc: 'Dẫm phải bùa chú cổ đại! Bị đẩy lùi 5 bước.', icon: '📜', type: 'curse', value: -5 },
   18: { tileIndex: 18, title: '💎 Rương Châu Báu', desc: 'Nhặt được rương châu báu Trạng nguyên! Thưởng +5 điểm Hào quang!', icon: '💎', type: 'treasure', value: 5 },
   22: { tileIndex: 22, title: '👹 Quái Vật Rồng Lửa', desc: 'Rồng Lửa chặn đường! Phải lắc Xúc sắc 6 điểm lượt sau mới thoát.', icon: '👹', type: 'monster' },
   25: { tileIndex: 25, title: '🍌 Vỏ Chuối Trơn Trượt', desc: 'Trượt vỏ chuối! Bị giật lùi 3 bước!', icon: '🍌', type: 'curse', value: -3 },
   27: { tileIndex: 27, title: '🌀 Cổng Thần Tốc', desc: 'Cổng không gian đưa bạn vượt 3 bước.', icon: '🌀', type: 'portal', value: 3 },
-  30: { tileIndex: 30, title: '👑 Vương Miện Hoàng Gia', desc: 'Được Hoàng đế ban vương miện! Thưởng ngay +8 điểm Hào quang!', icon: '👑', type: 'treasure', value: 8 },
+  30: { tileIndex: 30, title: '⭐ Trainer Badge', desc: 'Nhận huy hiệu trainer! Thưởng ngay +8 điểm Hào quang!', icon: '⭐', type: 'treasure', value: 8 },
   32: { tileIndex: 32, title: '📜 Bùa Ngải Hãm Hại', desc: 'Bùa ngải che mắt! Bị giật lùi 5 bước.', icon: '📜', type: 'curse', value: -5 },
   35: { tileIndex: 35, title: '💣 Bom Nổ Bùng Nổ', desc: 'Sức ép bùng nổ hất văng lùi 4 bước!', icon: '💣', type: 'curse', value: -4 },
   38: { tileIndex: 38, title: '👹 Quái Vật Bóng Đêm', desc: 'Quái vật bóng đêm! Cần lắc 6 điểm ở lượt kế tiếp để bứt phá.', icon: '👹', type: 'monster' },
-  41: { tileIndex: 41, title: '💎 Kho Báu Hoàng Gia', desc: 'Bảo vật vinh quang ban thưởng +5 điểm Hào quang!', icon: '💎', type: 'treasure', value: 5 },
+  41: { tileIndex: 41, title: '💎 Kho Báu Trainer', desc: 'Bảo vật vinh quang ban thưởng +5 điểm Hào quang!', icon: '💎', type: 'treasure', value: 5 },
   45: { tileIndex: 45, title: '📜 Bùa Chú Lùi Bước', desc: 'Chạm trán bùa phong ấn! Thu lùi 5 bước.', icon: '📜', type: 'curse', value: -5 },
-  48: { tileIndex: 48, title: '🐉 Thần Rồng Triều Đình', desc: 'Thần Rồng tái xuất! Đưa bạn tiến thẳng 1 bước chạm đỉnh vinh quang!', icon: '🐉', type: 'portal', value: 1 }
+  48: { tileIndex: 48, title: '✨ Final Sprint', desc: 'Bứt tốc cuối đường! Tiến thẳng 1 bước chạm đích vinh quang!', icon: '✨', type: 'portal', value: 1 }
 };

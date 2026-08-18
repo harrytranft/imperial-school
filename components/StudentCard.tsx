@@ -3,6 +3,7 @@ import React from 'react';
 import { Student, RankInfo, Gender } from '../types';
 import { PetSkill } from '../pokemonData';
 import { getPokemonArtworkUrl, getPokemonDisplayName, handlePokemonArtworkError } from '../pokemonProgression';
+import { StudentAvatar } from './StudentAvatar';
 
 interface StudentCardProps {
   student: Student;
@@ -13,7 +14,7 @@ interface StudentCardProps {
 }
 
 export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSelect, petSkills, isSelected }) => {
-  const rank = getRank(student.points, student.gender);
+  getRank(student.points, student.gender);
   const isAbsent = student.isAbsent;
 
   const egg = student.egg;
@@ -40,7 +41,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
   return (
     <div 
       onClick={() => onSelect(student)}
-      className={`relative rounded-[32px] p-5 cursor-pointer flex flex-col gap-4 transition-all duration-300 border-2 backdrop-blur-xl group ${
+      className={`relative h-[360px] rounded-[32px] p-5 cursor-pointer flex flex-col gap-4 transition-all duration-300 border-2 backdrop-blur-xl group ${
         isSelected 
           ? 'border-red-800 bg-red-100/90 ring-8 ring-red-800/20 shadow-2xl scale-[1.02] -translate-y-2' 
           : isAbsent 
@@ -54,12 +55,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
 
       <div className="flex items-center gap-5 mt-4">
         <div className="w-20 h-20 shrink-0 relative">
-          <img 
-            referrerPolicy="no-referrer"
-            src={student.customAvatar || rank.avatar || 'https://api.dicebear.com/7.x/bottts/svg'} 
-            className="w-full h-full rounded-[24px] object-cover border-4 border-white shadow-lg" 
-            alt={student.name}
-          />
+          <StudentAvatar student={student} className="w-full h-full rounded-[24px] border-4 border-white shadow-lg" />
           {isAbsent && (
             <div className="absolute inset-0 bg-gray-900/60 rounded-[24px] flex items-center justify-center text-[10px] text-white font-black uppercase tracking-widest">VẮNG</div>
           )}
@@ -117,7 +113,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
             )}
             <h3 className="text-xl font-bold text-gray-800 truncate">{student.name}</h3>
           </div>
-          <p className={`text-[10px] uppercase font-black tracking-widest ${rank.color}`}>{rank.title}</p>
+          <p className="text-[10px] uppercase font-black tracking-widest text-teal-700">Pokemon Trainer</p>
           {streakBadges.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {streakBadges.map(badge => (
@@ -131,7 +127,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
       </div>
 
       {/* NEW POKEMON COMPANION STATUS COMPONENT */}
-      <div className="bg-gray-50/70 p-3 rounded-2xl border border-gray-100/50 flex items-center gap-3 mt-1">
+      <div className="bg-gray-50/70 p-3 rounded-2xl border border-gray-100/50 flex items-center gap-3 mt-1 min-h-[92px]">
         {pet ? (
           <>
             <div className="w-10 h-10 shrink-0 bg-white rounded-xl border border-amber-200 p-0.5 flex items-center justify-center shadow-sm relative group/pet animate-in fade-in zoom-in duration-300">
@@ -183,7 +179,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
         )}
       </div>
 
-      <div className="flex justify-between items-end pt-4 border-t border-gray-50">
+      <div className="mt-auto flex justify-between items-end pt-4 border-t border-gray-50">
         <div className="flex-1">
            <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
               <div 
@@ -191,13 +187,13 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
                 style={{ width: `${Math.min(100, Math.max(0, (student.points % 50) / 50 * 100))}%` }}
               />
            </div>
-           <p className="text-[8px] uppercase opacity-30 mt-1 font-bold">Thăng cấp kế tiếp</p>
+           <p className="text-[8px] uppercase opacity-30 mt-1 font-bold">Level kế tiếp</p>
         </div>
         <div className="ml-6 flex flex-col items-end">
            <p className={`text-3xl font-black leading-none ${student.points >= 0 ? 'text-gray-900' : 'text-red-600'}`}>
              {student.points}
            </p>
-           <p className="text-[8px] uppercase font-black opacity-30 mt-1">Hao Quang</p>
+           <p className="text-[8px] uppercase font-black opacity-30 mt-1">Hào Quang</p>
         </div>
       </div>
     </div>
