@@ -1,5 +1,5 @@
 
-import { Gender, LuckyWheelReward, RankInfo, Skill } from './types';
+import { Gender, LuckyWheelReward, LudoTileSpec, RankInfo, Skill } from './types';
 
 export const STORAGE_KEY = 'imperial_school_data_v6';
 export const RANKS_KEY_MALE = 'imperial_ranks_male_v6';
@@ -109,21 +109,50 @@ export const DEFAULT_LUCKY_WHEEL_REWARDS: LuckyWheelReward[] = [
   { id: 'ludo_rolls_5', label: 'Lắc Cá Ngựa 5 lần', icon: '🎲', type: 'ludo_rolls', amount: 5, color: '#c026d3' }
 ];
 
-export const DEFAULT_LUDO_TILES: Record<number, { tileIndex: number; title: string; desc: string; icon: string; type: 'portal' | 'curse' | 'treasure' | 'monster' | 'restart'; value?: number }> = {
-  3: { tileIndex: 3, title: '🚀 Turbo Boost', desc: 'Phóng vọt 4 bước về phía trước!', icon: '🚀', type: 'portal', value: 4 },
-  5: { tileIndex: 5, title: '🌀 Cổng Dịch Chuyển', desc: 'Cuồng phong thần tốc kéo bạn tiến nhanh 3 bước!', icon: '🌀', type: 'portal', value: 3 },
-  8: { tileIndex: 8, title: '⚠️ Chướng Ngại Vật', desc: 'Gặp chướng ngại vật! Lượt sau phải tung xúc xắc 6 điểm mới vượt qua!', icon: '⚠️', type: 'monster' },
-  12: { tileIndex: 12, title: '⚡ Giày Thần Kỳ', desc: 'Nhảy vọt 3 bước thần tốc!', icon: '⚡', type: 'portal', value: 3 },
-  14: { tileIndex: 14, title: '📜 Bùa Chú Thoái Lùi', desc: 'Dẫm phải bùa chú cổ đại! Bị đẩy lùi 5 bước.', icon: '📜', type: 'curse', value: -5 },
-  18: { tileIndex: 18, title: '💎 Rương Châu Báu', desc: 'Nhặt được rương châu báu Trạng nguyên! Thưởng +5 điểm Hào quang!', icon: '💎', type: 'treasure', value: 5 },
-  22: { tileIndex: 22, title: '👹 Quái Vật Rồng Lửa', desc: 'Rồng Lửa chặn đường! Phải lắc Xúc sắc 6 điểm lượt sau mới thoát.', icon: '👹', type: 'monster' },
-  25: { tileIndex: 25, title: '🍌 Vỏ Chuối Trơn Trượt', desc: 'Trượt vỏ chuối! Bị giật lùi 3 bước!', icon: '🍌', type: 'curse', value: -3 },
-  27: { tileIndex: 27, title: '🌀 Cổng Thần Tốc', desc: 'Cổng không gian đưa bạn vượt 3 bước.', icon: '🌀', type: 'portal', value: 3 },
-  30: { tileIndex: 30, title: '⭐ Trainer Badge', desc: 'Nhận huy hiệu trainer! Thưởng ngay +8 điểm Hào quang!', icon: '⭐', type: 'treasure', value: 8 },
-  32: { tileIndex: 32, title: '📜 Bùa Ngải Hãm Hại', desc: 'Bùa ngải che mắt! Bị giật lùi 5 bước.', icon: '📜', type: 'curse', value: -5 },
-  35: { tileIndex: 35, title: '💣 Bom Nổ Bùng Nổ', desc: 'Sức ép bùng nổ hất văng lùi 4 bước!', icon: '💣', type: 'curse', value: -4 },
-  38: { tileIndex: 38, title: '👹 Quái Vật Bóng Đêm', desc: 'Quái vật bóng đêm! Cần lắc 6 điểm ở lượt kế tiếp để bứt phá.', icon: '👹', type: 'monster' },
-  41: { tileIndex: 41, title: '💎 Kho Báu Trainer', desc: 'Bảo vật vinh quang ban thưởng +5 điểm Hào quang!', icon: '💎', type: 'treasure', value: 5 },
-  45: { tileIndex: 45, title: '📜 Bùa Chú Lùi Bước', desc: 'Chạm trán bùa phong ấn! Thu lùi 5 bước.', icon: '📜', type: 'curse', value: -5 },
-  48: { tileIndex: 48, title: '✨ Final Sprint', desc: 'Bứt tốc cuối đường! Tiến thẳng 1 bước chạm đích vinh quang!', icon: '✨', type: 'portal', value: 1 }
-};
+const DEFAULT_LUDO_TILE_LIST: LudoTileSpec[] = [
+  { tileIndex: 1, title: '🚀 Turbo Start', desc: 'Xuất phát như tên lửa! Tiến thêm 3 bước.', icon: '🚀', type: 'portal', value: 3 },
+  { tileIndex: 2, title: '🍀 Cỏ May Mắn', desc: 'Nhặt cỏ may mắn, nhận +2 điểm Hào Quang.', icon: '🍀', type: 'treasure', value: 2 },
+  { tileIndex: 3, title: '🌀 Cổng Gió', desc: 'Cơn gió kéo trainer tiến thêm 4 bước.', icon: '🌀', type: 'portal', value: 4 },
+  { tileIndex: 4, title: '🪨 Đá Chặn Đường', desc: 'Vấp đá, bị lùi 2 bước.', icon: '🪨', type: 'curse', value: -2 },
+  { tileIndex: 5, title: '⚡ Đệm Sấm', desc: 'Bật lên cực nhanh, tiến thêm 3 bước.', icon: '⚡', type: 'portal', value: 3 },
+  { tileIndex: 6, title: '💎 Rương Nhỏ', desc: 'Mở rương nhỏ, nhận +3 điểm Hào Quang.', icon: '💎', type: 'treasure', value: 3 },
+  { tileIndex: 8, title: '👹 Quái Vật Cổng Trường', desc: 'Bị chặn lại! Lượt sau phải tung đúng 6 mới thoát.', icon: '👹', type: 'monster' },
+  { tileIndex: 9, title: '🍌 Vỏ Chuối', desc: 'Trượt chân, bị lùi 3 bước.', icon: '🍌', type: 'curse', value: -3 },
+  { tileIndex: 10, title: '🌟 Sao Tốc Độ', desc: 'Sao sáng dẫn đường, tiến thêm 2 bước.', icon: '🌟', type: 'portal', value: 2 },
+  { tileIndex: 11, title: '🎁 Túi Quà', desc: 'Nhận quà giữa đường, +4 điểm Hào Quang.', icon: '🎁', type: 'treasure', value: 4 },
+  { tileIndex: 12, title: '🌪️ Gió Ngược', desc: 'Gió ngược đẩy lùi 3 bước.', icon: '🌪️', type: 'curse', value: -3 },
+  { tileIndex: 13, title: '🛡️ Lá Chắn Trainer', desc: 'Tinh thần vững vàng, nhận +3 điểm Hào Quang.', icon: '🛡️', type: 'treasure', value: 3 },
+  { tileIndex: 14, title: '🧭 Đường Tắt', desc: 'Tìm thấy đường tắt, tiến thêm 4 bước.', icon: '🧭', type: 'portal', value: 4 },
+  { tileIndex: 16, title: '🕳️ Hố Bất Ngờ', desc: 'Rơi xuống hố, bị lùi 4 bước.', icon: '🕳️', type: 'curse', value: -4 },
+  { tileIndex: 17, title: '💫 Dải Sao', desc: 'Lướt theo dải sao, tiến thêm 3 bước.', icon: '💫', type: 'portal', value: 3 },
+  { tileIndex: 18, title: '🏅 Huy Hiệu Trainer', desc: 'Nhận huy hiệu, +5 điểm Hào Quang.', icon: '🏅', type: 'treasure', value: 5 },
+  { tileIndex: 19, title: '🧊 Băng Trơn', desc: 'Trượt dài, bị lùi 4 bước.', icon: '🧊', type: 'curse', value: -4 },
+  { tileIndex: 20, title: '👹 Quái Vật Sân Tập', desc: 'Bị quái vật giữ chân! Cần tung đúng 6 để đi tiếp.', icon: '👹', type: 'monster' },
+  { tileIndex: 21, title: '🚲 Xe Đạp Nhanh', desc: 'Đạp xe bứt tốc, tiến thêm 5 bước.', icon: '🚲', type: 'portal', value: 5 },
+  { tileIndex: 22, title: '📦 Hộp Bí Ẩn', desc: 'Mở hộp bí ẩn, nhận +4 điểm Hào Quang.', icon: '📦', type: 'treasure', value: 4 },
+  { tileIndex: 24, title: '🎯 Đường Chuẩn', desc: 'Đi đúng đường đua, tiến thêm 3 bước.', icon: '🎯', type: 'portal', value: 3 },
+  { tileIndex: 25, title: '💣 Bom Khói', desc: 'Bom khói nổ tung, bị lùi 5 bước.', icon: '💣', type: 'curse', value: -5 },
+  { tileIndex: 26, title: '💰 Kho Báu', desc: 'Nhặt được kho báu, +6 điểm Hào Quang.', icon: '💰', type: 'treasure', value: 6 },
+  { tileIndex: 27, title: '🌀 Cổng Thần Tốc', desc: 'Cổng không gian đưa bạn tiến thêm 4 bước.', icon: '🌀', type: 'portal', value: 4 },
+  { tileIndex: 28, title: '🧲 Nam Châm Ngược', desc: 'Bị kéo lùi 5 bước.', icon: '🧲', type: 'curse', value: -5 },
+  { tileIndex: 30, title: '⚔️ Sàn Thách Đấu', desc: 'Tinh thần battle bùng lên, +6 điểm Hào Quang.', icon: '⚔️', type: 'treasure', value: 6 },
+  { tileIndex: 31, title: '🌋 Dốc Núi Lửa', desc: 'Trượt khỏi dốc nóng, bị lùi 6 bước.', icon: '🌋', type: 'curse', value: -6 },
+  { tileIndex: 32, title: '👹 Quái Vật Bóng Đêm', desc: 'Quái vật bóng đêm khóa đường! Cần tung đúng 6 để thoát.', icon: '👹', type: 'monster' },
+  { tileIndex: 33, title: '🚀 Bệ Phóng Cuối', desc: 'Bệ phóng mạnh mẽ, tiến thêm 4 bước.', icon: '🚀', type: 'portal', value: 4 },
+  { tileIndex: 34, title: '🪙 Đồng Vàng', desc: 'Nhặt được đồng vàng hiếm, +7 điểm Hào Quang.', icon: '🪙', type: 'treasure', value: 7 },
+  { tileIndex: 36, title: '🌪️ Bão Cuối Đường', desc: 'Bão lớn thổi ngược, bị lùi 6 bước.', icon: '🌪️', type: 'curse', value: -6 },
+  { tileIndex: 37, title: '🕸️ Lưới Nhện', desc: 'Dính lưới, lượt sau phải tung đúng 6 mới thoát.', icon: '🕸️', type: 'monster' },
+  { tileIndex: 38, title: '🏆 Cúp Áp Lực', desc: 'Càng gần đích càng run, nhưng vẫn nhận +5 điểm Hào Quang.', icon: '🏆', type: 'treasure', value: 5 },
+  { tileIndex: 39, title: '🧨 Bãi Mìn', desc: 'Dẫm trúng bãi mìn, bị lùi 8 bước.', icon: '🧨', type: 'curse', value: -8 },
+  { tileIndex: 40, title: '🔁 Lạc Vòng', desc: 'Đi nhầm đường, quay về vạch xuất phát.', icon: '🔁', type: 'restart' },
+  { tileIndex: 41, title: '🌀 Cổng Rủi Ro', desc: 'Cổng đẩy lên 3 bước, nhưng coi chừng bẫy phía trước.', icon: '🌀', type: 'portal', value: 3 },
+  { tileIndex: 42, title: '🪤 Bẫy Sập', desc: 'Bẫy sập kéo lùi 9 bước.', icon: '🪤', type: 'curse', value: -9 },
+  { tileIndex: 44, title: '👹 Trùm Giữ Cổng', desc: 'Boss giữ cổng đích! Cần tung đúng 6 để vượt qua.', icon: '👹', type: 'monster' },
+  { tileIndex: 45, title: '⛈️ Sét Đánh Lùi', desc: 'Sét đánh ngay trước đích, bị lùi 10 bước.', icon: '⛈️', type: 'curse', value: -10 },
+  { tileIndex: 46, title: '🔁 Vòng Xoáy Định Mệnh', desc: 'Bị cuốn về vạch xuất phát.', icon: '🔁', type: 'restart' },
+  { tileIndex: 48, title: '💥 Cửa Ải Cuối', desc: 'Cửa ải cuối cực khó, bị lùi 12 bước.', icon: '💥', type: 'curse', value: -12 }
+];
+
+export const DEFAULT_LUDO_TILES: Record<number, LudoTileSpec> = Object.fromEntries(
+  DEFAULT_LUDO_TILE_LIST.map(tile => [tile.tileIndex, tile])
+);

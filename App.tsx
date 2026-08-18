@@ -42,6 +42,8 @@ import {
 
 type Screen = 'plaza' | 'class' | 'profile' | 'settings';
 
+const LUDO_FINISH_TILE = 49;
+
 interface LuckyWheelResult {
   student: Student;
   reward: LuckyWheelReward;
@@ -901,6 +903,14 @@ const App: React.FC = () => {
       .filter(s => s.className === activeLudoClassName && !s.isAbsent)
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [students, activeLudoClassName]);
+  const effectiveLudoTiles = useMemo(
+    () => ({ ...DEFAULT_LUDO_TILES, ...customLudoTiles }),
+    [customLudoTiles]
+  );
+  const ludoSpecialTileCount = useMemo(
+    () => Object.keys(effectiveLudoTiles).filter(tile => Number(tile) >= 0 && Number(tile) <= LUDO_FINISH_TILE).length,
+    [effectiveLudoTiles]
+  );
 
   useEffect(() => {
     if (ludoActiveStudent && ludoActiveStudent.className !== activeLudoClassName) {
@@ -3001,6 +3011,7 @@ const App: React.FC = () => {
       const roll = Math.floor(Math.random() * 6) + 1;
       setLudoDice(roll);
       setLudoRolling(false);
+
       const advanceBattleQueue = (nextStudents: Student[]) => {
         setBattleLudoQueue(prev => {
           if (prev.length === 0) return prev;
@@ -3036,125 +3047,130 @@ const App: React.FC = () => {
 
       const oldSteps = ludoSteps[student.id] || 0;
       let newSteps = oldSteps + roll;
-      const oldLap = Math.floor(oldSteps / 50);
-      const newLap = Math.floor(newSteps / 50);
-      let newPos = newSteps % 50;
-
-      const logs: string[] = [`🎲 ${student.name} tung được ${roll} điểm, tiến đến ô số ${newPos}!`];
+      let newPos = Math.min(newSteps, LUDO_FINISH_TILE);
+      const nextPositions = { ...ludoPositions };
+      const nextSteps = { ...ludoSteps };
+      const nextMonsterStuck = { ...ludoMonsterStuck };
+      const raceRoster = students.filter(s => s.className === student.className && !s.isAbsent);
+      const logs: string[] = [
+        newSteps >= LUDO_FINISH_TILE
+          ? `🎲 ${student.name} tung được ${roll} điểm và lao thẳng về đích!`
+          : `🎲 ${student.name} tung được ${roll} điểm, tiến đến ô số ${newPos}!`
+      ];
       let popupEvent: any = null;
-      let reachedFinishReward = newPos === 49;
+      let reachedFinishReward = false;
 
-      // Lap completion check (+20 points)
-      if (newLap > oldLap) {
+      const updateKickedStudent = (target: Student) => {
+        nextPositions[target.id] = 0;
+        nextSteps[target.id] = 0;
+        nextMonsterStuck[target.id] = false;
+        updatedStudents = updatedStudents.map(s => {
+          if (s.id === target.id) {
+            return { ...s, ludoTile: 0, ludoSteps: 0, ludoMonsterStuck: false };
+          }
+          return s;
+        });
+      };
+
+      const kickOccupantAt = (tileIndex: number, context: string) => {
+        if (tileIndex === 0) return false;
+        const target = raceRoster.find(other => other.id !== student.id && (nextPositions[other.id] || 0) === tileIndex);
+        if (!target) return false;
+        updateKickedStudent(target);
+        logs.unshift(`💥 ${student.name} ${context} ô ${tileIndex} và ĐÁ ${target.name} về lại vạch xuất phát!`);
+        popupEvent = {
+          title: '💥 CÚ ĐÁ VỀ CHUỒNG! 💥',
+          message: `${student.name} vừa chiếm ô ${tileIndex}. ${target.name} bị đá về Vạch Xuất Phát (ô 0)!`,
+          actor: student,
+          target,
+          icon: '💥',
+          type: 'kick',
+          tileIndex
+        };
+        return true;
+      };
+
+      const sendToFinish = (reason: string) => {
+        if (reachedFinishReward) return;
         reachedFinishReward = true;
+        newSteps = 0;
+        newPos = 0;
         updatedStudents = updatedStudents.map(s => {
           if (s.id === student.id) {
             return applyLudoAuraReward(s, 20, '🎉 Hoàn thành 1 vòng bàn cờ Cá Ngựa (+20đ)');
           }
           return s;
         });
-        logs.unshift(`🎉 ${student.name} đã đi trọn 1 vòng bàn cờ Cá Ngựa (50 ô)! Thưởng ngay +20 điểm Hào quang!`);
-        popupEvent = {
-          title: '👑 HOÀN THÀNH 1 VÒNG BÀN CỜ!',
-          message: `${student.name} đã cán đích đi trọn 1 vòng bàn cờ Cá Ngựa (50 ô)! Thưởng ngay +20 điểm Hào quang!`,
-          actor: student,
-          icon: '👑',
-          type: 'finish'
-        };
-      }
-
-      // Collision / Kicking check
-      let kickedStudent: Student | null = null;
-      students
-        .filter(s => s.className === student.className && !s.isAbsent)
-        .forEach(other => {
-        if (other.id !== student.id && (ludoPositions[other.id] || 0) === newPos && newPos !== 0) {
-          kickedStudent = other;
+        logs.unshift(`🏁 ${student.name} ${reason} và quay lại ô 0 để bắt đầu vòng mới. Thưởng +20 điểm Hào Quang!`);
+        if (!popupEvent) {
+          popupEvent = {
+            title: '🏁 CÁN ĐÍCH!',
+            message: `${student.name} đã về đích, nhận +20 điểm Hào Quang và quay lại ô 0 để chơi vòng mới.`,
+            actor: student,
+            icon: '🏁',
+            type: 'finish'
+          };
         }
-      });
+      };
 
-      if (kickedStudent) {
-        const target = kickedStudent as Student;
-        setLudoPositions(prev => ({ ...prev, [target.id]: 0 }));
-        setLudoSteps(prev => ({ ...prev, [target.id]: 0 }));
-        updatedStudents = updatedStudents.map(s => {
-          if (s.id === target.id) {
-            return { ...s, ludoTile: 0, ludoSteps: 0 };
-          }
-          return s;
-        });
-        logs.unshift(`⚔️ ${student.name} dẫm lên ô ${newPos} và ĐÁ ${target.name} về lại Vạch Xuất Phát (ô 0)!`);
-        popupEvent = {
-          title: '💥 CÚ ĐÁ HOÀNG GIA! 💥',
-          message: `${student.name} vừa dẫm lên ô ${newPos} và ĐÁ ${target.name} văng về lại Vạch Xuất Phát (ô 0)!`,
-          actor: student,
-          target: target,
-          icon: '💥',
-          type: 'kick'
-        };
-      }
-
-      // Special tile check (if no kick happened)
-      const tileSpec = customLudoTiles[newPos] || DEFAULT_LUDO_TILES[newPos];
-      if (tileSpec) {
+      const applyMovementTile = (tileSpec: LudoTileSpec) => {
         if (tileSpec.type === 'monster') {
-          setLudoMonsterStuck(prev => ({ ...prev, [student.id]: true }));
-          logs.unshift(`👹 ${student.name} sa vào ô ${tileSpec.title}! Lượt sau cần lắc được 6 mới đi tiếp.`);
+          nextMonsterStuck[student.id] = true;
+          logs.unshift(`👹 ${student.name} sa vào ${tileSpec.title}! Lượt sau cần lắc được 6 mới đi tiếp.`);
           if (!popupEvent) {
             popupEvent = {
               title: tileSpec.title,
-              message: `${student.name} sa vào ô ${tileSpec.title}: ${tileSpec.desc}`,
+              message: `${student.name} sa vào ô ${tileSpec.tileIndex}: ${tileSpec.desc}`,
               actor: student,
               icon: tileSpec.icon,
               type: 'monster'
             };
           }
-        } else if (tileSpec.type === 'curse') {
-          const val = tileSpec.value || -5;
-          const curSteps = Math.max(0, newSteps + val);
-          const curPos = curSteps % 50;
-          newSteps = curSteps;
-          newPos = curPos;
-          logs.unshift(`📜 ${student.name} dẫm phải ${tileSpec.title}! ${tileSpec.desc}`);
+          return;
+        }
+
+        if (tileSpec.type === 'curse' || tileSpec.type === 'portal') {
+          const val = tileSpec.value || (tileSpec.type === 'curse' ? -5 : 3);
+          const shiftedSteps = Math.max(0, newSteps + val);
+          newSteps = shiftedSteps;
+          if (shiftedSteps >= LUDO_FINISH_TILE) {
+            logs.unshift(`${tileSpec.icon} ${student.name} kích hoạt ${tileSpec.title}! ${tileSpec.desc}`);
+            sendToFinish('được hiệu ứng đẩy tới/vượt đích');
+            return;
+          }
+          newPos = shiftedSteps;
+          logs.unshift(`${tileSpec.icon} ${student.name} kích hoạt ${tileSpec.title}! ${tileSpec.desc}`);
           if (!popupEvent) {
             popupEvent = {
               title: tileSpec.title,
-              message: `${student.name} dẫm phải ô ${tileSpec.title}: ${tileSpec.desc}`,
+              message: `${student.name} kích hoạt ô ${tileSpec.tileIndex}: ${tileSpec.desc} Vị trí mới: ô ${newPos}.`,
               actor: student,
               icon: tileSpec.icon,
-              type: 'curse'
+              type: tileSpec.type
             };
           }
-        } else if (tileSpec.type === 'portal') {
-          const val = tileSpec.value || 3;
-          const fwdSteps = newSteps + val;
-          const fwdPos = fwdSteps % 50;
-          newSteps = fwdSteps;
-          newPos = fwdPos;
-          logs.unshift(`🌀 ${student.name} dẫm phải ${tileSpec.title}! ${tileSpec.desc}`);
-          if (!popupEvent) {
-            popupEvent = {
-              title: tileSpec.title,
-              message: `${student.name} dẫm phải ô ${tileSpec.title}: ${tileSpec.desc}`,
-              actor: student,
-              icon: tileSpec.icon,
-              type: 'portal'
-            };
-          }
-        } else if (tileSpec.type === 'restart') {
+          kickOccupantAt(newPos, 'bị hiệu ứng đưa tới');
+          return;
+        }
+
+        if (tileSpec.type === 'restart') {
           newSteps = 0;
           newPos = 0;
-          logs.unshift(`🌀 ${student.name} dẫm phải ${tileSpec.title}! Bị lùi về vạch xuất phát.`);
+          nextMonsterStuck[student.id] = false;
+          logs.unshift(`🔁 ${student.name} kích hoạt ${tileSpec.title}! Quay về vạch xuất phát.`);
           if (!popupEvent) {
             popupEvent = {
               title: tileSpec.title,
-              message: `${student.name} dẫm phải ô ${tileSpec.title}! ${tileSpec.desc}`,
+              message: `${student.name} kích hoạt ô ${tileSpec.tileIndex}: ${tileSpec.desc}`,
               actor: student,
               icon: tileSpec.icon,
               type: 'curse'
             };
           }
-        } else if (tileSpec.type === 'treasure') {
+          return;
+        }
+
+        if (tileSpec.type === 'treasure') {
           const val = tileSpec.value || 5;
           updatedStudents = updatedStudents.map(s => {
             if (s.id === student.id) {
@@ -3162,25 +3178,36 @@ const App: React.FC = () => {
             }
             return s;
           });
-          logs.unshift(`💎 ${student.name} dẫm phải ${tileSpec.title}! ${tileSpec.desc}`);
+          logs.unshift(`💎 ${student.name} kích hoạt ${tileSpec.title}! ${tileSpec.desc}`);
           if (!popupEvent) {
             popupEvent = {
               title: tileSpec.title,
-              message: `${student.name} dẫm phải ô ${tileSpec.title}: ${tileSpec.desc}`,
+              message: `${student.name} kích hoạt ô ${tileSpec.tileIndex}: ${tileSpec.desc}`,
               actor: student,
               icon: tileSpec.icon,
-              type: 'treasure'
+              type: 'special'
             };
           }
         }
-      }
-      if (newPos === 49) {
-        reachedFinishReward = true;
-        logs.unshift(`🎡 ${student.name} đã đến ô cuối cùng! Mở Vòng quay may mắn với tỉ lệ 60% quà tốt / 40% quà thử thách.`);
+      };
+
+      if (newSteps >= LUDO_FINISH_TILE) {
+        sendToFinish('đã chạm hoặc vượt vạch đích');
+      } else {
+        kickOccupantAt(newPos, 'đáp xuống');
+        const tileSpec = effectiveLudoTiles[newPos];
+        if (tileSpec) applyMovementTile(tileSpec);
       }
 
-      setLudoSteps(prev => ({ ...prev, [student.id]: newSteps }));
-      setLudoPositions(prev => ({ ...prev, [student.id]: newPos }));
+      if (reachedFinishReward) {
+        logs.unshift(`🎡 Mở Vòng quay may mắn cho ${student.name} với tỉ lệ 60% quà tốt / 40% quà thử thách.`);
+      }
+
+      nextSteps[student.id] = newSteps;
+      nextPositions[student.id] = newPos;
+      setLudoSteps(nextSteps);
+      setLudoPositions(nextPositions);
+      setLudoMonsterStuck(nextMonsterStuck);
 
       // Apply student ludo status update
       updatedStudents = updatedStudents.map(s => {
@@ -3189,7 +3216,7 @@ const App: React.FC = () => {
             ...s,
             ludoTile: newPos,
             ludoSteps: newSteps,
-            ludoMonsterStuck: !!ludoMonsterStuck[student.id]
+            ludoMonsterStuck: !!nextMonsterStuck[student.id]
           };
         }
         return s;
@@ -5376,25 +5403,30 @@ const App: React.FC = () => {
 
       {/* MODAL: CÁ NGỰA BOARD GAME */}
       {showLudoModal && (
-        <div className="fixed inset-0 z-[120] flex flex-col bg-amber-50/95 backdrop-blur-md overflow-hidden animate-in fade-in duration-300">
-          <div className="bg-amber-900 text-amber-100 p-4 px-6 flex justify-between items-center shadow-md shrink-0 border-b-4 border-amber-600">
+        <div className="fixed inset-0 z-[120] flex flex-col overflow-hidden bg-[radial-gradient(circle_at_20%_0%,rgba(250,204,21,0.28),transparent_30%),radial-gradient(circle_at_90%_20%,rgba(239,68,68,0.24),transparent_34%),linear-gradient(135deg,#1e1207,#451a03_48%,#111827)] backdrop-blur-md animate-in fade-in duration-300">
+          <div className="border-b-4 border-amber-400/80 bg-black/45 p-4 px-6 text-amber-100 shadow-2xl backdrop-blur-xl shrink-0 flex justify-between items-center">
             <div className="flex items-center gap-3">
-              <span className="text-3xl">🐴</span>
+              <span className="grid h-12 w-12 place-items-center rounded-2xl border border-amber-200/60 bg-amber-300 text-3xl shadow-[0_0_28px_rgba(251,191,36,0.55)]">🐴</span>
               <div>
                 <h2 className="text-xl font-royal uppercase tracking-widest text-amber-300">Đường Đua Cá Ngựa (50 Ô)</h2>
-                <p className="text-[10px] text-amber-200">Lớp {activeLudoClassName || 'Chưa chọn'} - chỉ trainer cùng lớp đua với nhau.</p>
+                <p className="text-[10px] text-amber-100/85">Lớp {activeLudoClassName || 'Chưa chọn'} - 1 ô chỉ có 1 trainer đứng, trừ ô 0.</p>
               </div>
             </div>
-            <button onClick={() => { setBattleLudoQueue([]); setShowLudoModal(false); }} className="bg-amber-800 hover:bg-amber-700 text-white px-5 py-2 rounded-xl font-bold text-xs uppercase tracking-wider border border-amber-600">
+            <button onClick={() => { setBattleLudoQueue([]); setShowLudoModal(false); }} className="rounded-xl border border-amber-300/70 bg-amber-400/20 px-5 py-2 text-xs font-bold uppercase tracking-wider text-white shadow-lg transition-all hover:bg-amber-400/30">
               ← Quay Lại Lớp
             </button>
           </div>
 
           <div className="flex-1 p-4 overflow-y-auto max-w-7xl mx-auto w-full flex flex-col lg:flex-row gap-6">
             {/* Left side: Interactive Board */}
-            <div className="flex-1 bg-white p-6 rounded-3xl border-4 border-amber-300 shadow-xl space-y-6">
-              <div className="flex flex-col sm:flex-row justify-between gap-3 sm:items-center border-b border-amber-200 pb-3">
-                <h3 className="font-extrabold text-amber-950 text-base">Bàn Cờ Trainer (Ô 0 đến 49)</h3>
+            <div className="flex-1 rounded-[34px] border-4 border-amber-300/90 bg-white/88 p-5 shadow-[0_30px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl space-y-5">
+              <div className="flex flex-col gap-3 border-b border-amber-200 pb-3 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                  <h3 className="font-extrabold text-amber-950 text-base">Battle Race Board - Ô 0 đến {LUDO_FINISH_TILE}</h3>
+                  <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-amber-700">
+                    Càng gần đích càng nhiều bẫy lùi, restart và quái vật giữ cổng.
+                  </p>
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <select
                     value={activeLudoClassName}
@@ -5410,31 +5442,38 @@ const App: React.FC = () => {
                       <option key={cls} value={cls}>{cls}</option>
                     ))}
                   </select>
-                  <span className="text-xs font-bold text-amber-800 bg-amber-100 px-3 py-1 rounded-full">Tổng trainer: {ludoRaceStudents.length}</span>
+                  <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">Tổng trainer: {ludoRaceStudents.length}</span>
+                  <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-black text-red-800">
+                    Ô đặc biệt: {ludoSpecialTileCount}/50 ({Math.round((ludoSpecialTileCount / 50) * 100)}%)
+                  </span>
+                  <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800">Đích xong về ô 0</span>
                 </div>
               </div>
 
               {/* Grid of 50 tiles */}
-              <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
+              <div className="grid grid-cols-5 gap-2 rounded-[30px] border-2 border-amber-200 bg-gradient-to-br from-amber-100 via-orange-50 to-red-100 p-3 shadow-inner sm:grid-cols-10">
                 {Array.from({ length: 50 }).map((_, tileIdx) => {
-                  const spec = customLudoTiles[tileIdx] || DEFAULT_LUDO_TILES[tileIdx];
+                  const spec = effectiveLudoTiles[tileIdx];
                   const studentsOnTile = ludoRaceStudents.filter(s => (ludoPositions[s.id] || 0) === tileIdx);
+                  const hasActiveStudent = studentsOnTile.some(st => st.id === ludoActiveStudent?.id);
 
                   return (
                     <div 
                       key={tileIdx} 
-                      className={`min-h-[76px] sm:min-h-[84px] p-1.5 rounded-2xl border-2 flex flex-col items-center justify-between relative transition-all shadow-xs hover:shadow-md ${
+                      className={`relative flex min-h-[78px] flex-col items-center justify-between rounded-2xl border-2 p-1.5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg sm:min-h-[88px] ${
                         tileIdx === 0 ? 'bg-gradient-to-b from-green-100 to-emerald-50 border-green-500' :
+                        tileIdx === LUDO_FINISH_TILE ? 'bg-gradient-to-b from-yellow-200 via-amber-100 to-orange-100 border-yellow-500 shadow-[0_0_24px_rgba(250,204,21,0.45)]' :
                         spec?.type === 'monster' ? 'bg-gradient-to-b from-red-100 to-rose-50 border-red-500' :
                         spec?.type === 'curse' ? 'bg-gradient-to-b from-purple-100 to-fuchsia-50 border-purple-500' :
                         spec?.type === 'portal' ? 'bg-gradient-to-b from-blue-100 to-sky-50 border-blue-500' :
                         spec?.type === 'treasure' ? 'bg-gradient-to-b from-amber-100 to-yellow-50 border-amber-500' : 'bg-gradient-to-b from-stone-50 to-amber-50/30 border-stone-200 hover:border-amber-400'
-                      }`}
+                      } ${hasActiveStudent ? 'ring-4 ring-cyan-300/70 scale-[1.03]' : ''}`}
                     >
                       <div className="flex justify-between items-center w-full px-1">
                         <span className="text-[10px] font-black text-amber-950">{tileIdx}</span>
                         {spec && <span className="text-sm drop-shadow-xs">{spec.icon}</span>}
                         {tileIdx === 0 && <span className="text-[7px] font-black bg-green-700 text-white px-1 py-0.2 rounded uppercase tracking-wider">XUẤT PHÁT</span>}
+                        {tileIdx === LUDO_FINISH_TILE && <span className="rounded bg-yellow-600 px-1 text-[7px] font-black uppercase tracking-wider text-white">ĐÍCH</span>}
                       </div>
 
                       <div className="flex flex-wrap justify-center gap-1 my-1 z-10">
@@ -5476,13 +5515,13 @@ const App: React.FC = () => {
             </div>
 
             {/* Right side: Dice Roller Control */}
-            <div className="w-full lg:w-80 shrink-0 bg-white p-6 rounded-3xl border-4 border-amber-300 shadow-xl space-y-6 flex flex-col justify-between">
+            <div className="flex w-full shrink-0 flex-col justify-between space-y-6 rounded-[34px] border-4 border-amber-300/90 bg-white/90 p-6 shadow-[0_30px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl lg:w-[21rem] xl:w-[22rem]">
               <div>
-                <h3 className="font-extrabold text-amber-950 text-lg border-b border-amber-200 pb-3 mb-4">Lượt Đua Tiếp Theo</h3>
+                <h3 className="mb-4 border-b border-amber-200 pb-3 text-lg font-extrabold text-amber-950">Lượt Đua Tiếp Theo</h3>
 
                 <div className="space-y-3">
                   {battleLudoQueue.length > 0 ? (
-                    <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-3">
+                    <div className="rounded-2xl border-2 border-amber-300 bg-gradient-to-br from-amber-50 to-orange-50 p-3 shadow-inner">
                       <p className="mb-2 text-[10px] font-black uppercase tracking-wider text-amber-900">Queue Battle tự động</p>
                       <div className="space-y-1.5">
                         {battleLudoQueue.map((turn, index) => {
@@ -5517,11 +5556,11 @@ const App: React.FC = () => {
                   )}
 
                   {ludoActiveStudent && (
-                    <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 flex items-center gap-3">
-                      <StudentAvatar student={ludoActiveStudent} className="w-12 h-12 rounded-full border-2 border-amber-600" />
-                      <div>
+                    <div className="flex items-center gap-3 rounded-3xl border-2 border-amber-300 bg-gradient-to-br from-amber-100 via-white to-orange-100 p-4 shadow-lg">
+                      <StudentAvatar student={ludoActiveStudent} className="h-14 w-14 rounded-2xl border-2 border-amber-600 shadow-md" />
+                      <div className="min-w-0">
                         <h4 className="font-extrabold text-amber-950 text-sm">{ludoActiveStudent.name}</h4>
-                        <p className="text-[10px] font-bold text-amber-800">Đang ở ô: {ludoPositions[ludoActiveStudent.id] || 0} / 50</p>
+                        <p className="text-[10px] font-bold text-amber-800">Đang ở ô: {ludoPositions[ludoActiveStudent.id] || 0} / {LUDO_FINISH_TILE}</p>
                         {(ludoBonusRolls[ludoActiveStudent.id] || 0) > 0 && (
                           <span className="text-[9px] font-black text-blue-700 bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded">🎁 Còn {ludoBonusRolls[ludoActiveStudent.id]} lượt lắc bonus</span>
                         )}
@@ -5535,8 +5574,8 @@ const App: React.FC = () => {
               </div>
 
               {/* Dice Box */}
-              <div className="text-center space-y-4 py-4 border-t border-amber-200">
-                <div className={`w-24 h-24 mx-auto rounded-3xl border-4 border-amber-800 flex items-center justify-center text-5xl font-black shadow-inner transition-transform ${ludoRolling ? 'animate-spin bg-amber-200' : 'bg-amber-100 text-amber-950'}`}>
+              <div className="space-y-4 border-t border-amber-200 py-4 text-center">
+                <div className={`mx-auto flex h-28 w-28 items-center justify-center rounded-[32px] border-4 border-amber-800 text-6xl font-black shadow-[inset_0_8px_18px_rgba(120,53,15,0.18),0_18px_40px_rgba(180,83,9,0.28)] transition-transform ${ludoRolling ? 'animate-spin bg-amber-200' : 'bg-gradient-to-br from-white via-amber-100 to-orange-200 text-amber-950'}`}>
                   {ludoRolling ? '🎲' : ludoDice !== null ? ludoDice : '🎲'}
                 </div>
 
@@ -5546,7 +5585,7 @@ const App: React.FC = () => {
                     if (!ludoActiveStudent) return;
                     handleLudoRollDice(ludoActiveStudent, { isBonusRoll: (ludoBonusRolls[ludoActiveStudent.id] || 0) > 0 });
                   }}
-                  className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white py-4 rounded-2xl font-black uppercase tracking-wider text-sm shadow-xl transition-all"
+                  className="w-full rounded-2xl bg-gradient-to-r from-red-700 via-amber-600 to-orange-600 py-4 text-sm font-black uppercase tracking-wider text-white shadow-xl transition-all hover:scale-[1.02] hover:shadow-[0_18px_45px_rgba(180,83,9,0.35)] disabled:scale-100 disabled:opacity-40"
                 >
                   {ludoRolling
                     ? 'Đang Đổ Xí Ngầu...'
@@ -5582,6 +5621,30 @@ const App: React.FC = () => {
                 <p className="text-[10px] text-amber-800 font-bold">Vị trí hiện tại: Ô {ludoPositions[ludoEventPopup.actor.id] || 0}</p>
               </div>
             </div>
+
+            {ludoEventPopup.type === 'kick' && ludoEventPopup.target && (
+              <div className="relative mx-auto h-28 overflow-hidden rounded-3xl border-2 border-red-300 bg-gradient-to-r from-red-50 via-amber-50 to-emerald-50 p-3 shadow-inner">
+                <div className="absolute left-4 top-3 rounded-full bg-red-700 px-2 py-1 text-[8px] font-black uppercase tracking-wider text-white">
+                  Ô {ludoEventPopup.tileIndex}
+                </div>
+                <div className="absolute bottom-3 left-4 rounded-full bg-emerald-700 px-2 py-1 text-[8px] font-black uppercase tracking-wider text-white">
+                  Ô 0
+                </div>
+                <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-6">
+                  <StudentAvatar student={ludoEventPopup.actor} className="h-14 w-14 rounded-2xl border-2 border-amber-500 shadow-lg" />
+                  <span className="text-3xl font-black text-red-700">➜</span>
+                  <motion.div
+                    initial={{ x: 0, y: 0, rotate: 0, scale: 1 }}
+                    animate={{ x: -110, y: 18, rotate: -18, scale: 0.78 }}
+                    transition={{ type: 'spring', stiffness: 170, damping: 12 }}
+                    className="relative"
+                  >
+                    <StudentAvatar student={ludoEventPopup.target} className="h-14 w-14 rounded-2xl border-2 border-red-500 shadow-xl" />
+                    <span className="absolute -right-2 -top-2 rounded-full bg-red-600 px-1.5 text-[9px] font-black text-white shadow">Bị đá!</span>
+                  </motion.div>
+                </div>
+              </div>
+            )}
 
             <button
               onClick={() => setLudoEventPopup(null)}
