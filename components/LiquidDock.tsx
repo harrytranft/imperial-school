@@ -37,6 +37,13 @@ const formatVietnamTime = (date: Date) => new Intl.DateTimeFormat('vi-VN', {
   hour12: false
 }).format(date);
 
+const formatVietnamMinute = (date: Date) => new Intl.DateTimeFormat('vi-VN', {
+  timeZone: 'Asia/Ho_Chi_Minh',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false
+}).format(date);
+
 const getVietnamClockParts = (date: Date) => {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Ho_Chi_Minh',
@@ -53,25 +60,33 @@ const getVietnamClockParts = (date: Date) => {
   };
 };
 
-const AnalogClockIcon: React.FC<{ now: Date }> = ({ now }) => {
+const AnalogClockIcon: React.FC<{ now: Date; size?: number }> = ({ now, size = 48 }) => {
   const { hour, minute, second } = getVietnamClockParts(now);
   const hourDeg = ((hour % 12) * 30) + (minute * 0.5);
   const minuteDeg = minute * 6;
   const secondDeg = second * 6;
+  const handScale = size / 48;
 
   return (
-    <div className="relative h-10 w-10 rounded-full bg-black shadow-inner ring-2 ring-white/60">
+    <div
+      className="relative shrink-0 rounded-full bg-white shadow-inner ring-2 ring-stone-900/20"
+      style={{ width: `${size}px`, height: `${size}px` }}
+    >
+      <span className="absolute left-1/2 top-1 -translate-x-1/2 text-[9px] font-black leading-none text-stone-950">12</span>
+      <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[9px] font-black leading-none text-stone-950">3</span>
+      <span className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[9px] font-black leading-none text-stone-950">6</span>
+      <span className="absolute left-1 top-1/2 -translate-y-1/2 text-[9px] font-black leading-none text-stone-950">9</span>
       {[...Array(12)].map((_, index) => (
         <span
           key={index}
-          className="absolute left-1/2 top-1/2 h-1 w-0.5 origin-[50%_18px] rounded-full bg-white/70"
-          style={{ transform: `translate(-50%, -50%) rotate(${index * 30}deg) translateY(-16px)` }}
+          className="absolute left-1/2 top-1/2 h-1.5 w-0.5 rounded-full bg-stone-500"
+          style={{ transform: `translate(-50%, -50%) rotate(${index * 30}deg) translateY(-${size * 0.39}px)` }}
         />
       ))}
-      <span className="absolute left-1/2 top-1/2 h-2.5 w-1 origin-bottom rounded-full bg-white" style={{ transform: `translate(-50%, -100%) rotate(${hourDeg}deg)` }} />
-      <span className="absolute left-1/2 top-1/2 h-3.5 w-0.5 origin-bottom rounded-full bg-white" style={{ transform: `translate(-50%, -100%) rotate(${minuteDeg}deg)` }} />
-      <span className="absolute left-1/2 top-1/2 h-4 w-px origin-bottom rounded-full bg-amber-400" style={{ transform: `translate(-50%, -100%) rotate(${secondDeg}deg)` }} />
-      <span className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-400 ring-2 ring-white" />
+      <span className="absolute left-1/2 top-1/2 origin-bottom rounded-full bg-stone-950" style={{ width: `${4 * handScale}px`, height: `${14 * handScale}px`, transform: `translate(-50%, -100%) rotate(${hourDeg}deg)` }} />
+      <span className="absolute left-1/2 top-1/2 origin-bottom rounded-full bg-stone-950" style={{ width: `${2.5 * handScale}px`, height: `${19 * handScale}px`, transform: `translate(-50%, -100%) rotate(${minuteDeg}deg)` }} />
+      <span className="absolute left-1/2 top-1/2 origin-bottom rounded-full bg-red-600" style={{ width: `${1.5 * handScale}px`, height: `${21 * handScale}px`, transform: `translate(-50%, -100%) rotate(${secondDeg}deg)` }} />
+      <span className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-400 ring-2 ring-stone-950" />
     </div>
   );
 };
@@ -271,12 +286,15 @@ export const LiquidDock: React.FC<LiquidDockProps> = ({
           )}
           <button
             type="button"
-            style={{ width: `${getItemSize(clockIndex)}px`, height: `${getItemSize(clockIndex)}px` }}
-            className="relative rounded-2xl flex items-center justify-center transition-all duration-200 ease-out shadow-lg border border-white/80 bg-gradient-to-br from-stone-950 via-black to-stone-800 hover:shadow-2xl"
+            style={{ width: `${hoveredIndex === clockIndex ? 132 : 102}px`, height: `${Math.max(58, getItemSize(clockIndex))}px` }}
+            className="relative rounded-2xl flex items-center justify-center gap-2 px-2 transition-all duration-200 ease-out shadow-lg border border-white/80 bg-gradient-to-br from-stone-950 via-black to-stone-800 hover:shadow-2xl"
             title={`GMT+7: ${formatVietnamTime(now)} · ${syncLabel}`}
           >
             <div className="absolute inset-0 rounded-2xl bg-gradient-to-tr from-transparent via-white/10 to-white/30 pointer-events-none" />
-            <AnalogClockIcon now={now} />
+            <AnalogClockIcon now={now} size={hoveredIndex === clockIndex ? 56 : 46} />
+            <span className="relative z-10 whitespace-nowrap font-mono text-sm font-black leading-none text-white drop-shadow">
+              {formatVietnamMinute(now)}
+            </span>
           </button>
         </div>
 

@@ -317,6 +317,7 @@ const App: React.FC = () => {
   const [showShopModal, setShowShopModal] = useState(false);
   const [shopSelections, setShopSelections] = useState<Record<string, { egg?: 'normal' | 'special'; skills: string[] }>>({});
   const [shopReview, setShopReview] = useState<ShopReviewItem[] | null>(null);
+  const [selectedShopSkill, setSelectedShopSkill] = useState<PetSkill | null>(null);
   const [randomMode, setRandomMode] = useState<'solo' | 'battle'>('solo');
   const [battleStudentA, setBattleStudentA] = useState<Student | null>(null);
   const [battleStudentB, setBattleStudentB] = useState<Student | null>(null);
@@ -5465,10 +5466,11 @@ const App: React.FC = () => {
           className="fixed inset-0 z-[210] flex items-center justify-center bg-black/75 p-3 backdrop-blur-md animate-in fade-in duration-200"
           onMouseDown={event => {
             if (event.target === event.currentTarget) {
-              setShowShopModal(false);
-              setShopReview(null);
-            }
-          }}
+                setShowShopModal(false);
+                setShopReview(null);
+                setSelectedShopSkill(null);
+              }
+            }}
         >
           <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-[34px] border-2 border-white/80 bg-white/90 shadow-[0_30px_90px_rgba(15,118,110,0.28)] backdrop-blur-2xl">
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-teal-100 bg-gradient-to-r from-teal-50 via-cyan-50 to-emerald-50 p-5">
@@ -5480,6 +5482,7 @@ const App: React.FC = () => {
                 onClick={() => {
                   setShowShopModal(false);
                   setShopReview(null);
+                  setSelectedShopSkill(null);
                 }}
                 className="grid h-10 w-10 place-items-center rounded-full border border-teal-200 bg-white text-lg font-black text-teal-900 hover:bg-teal-50"
                 aria-label="Đóng Shop"
@@ -5488,28 +5491,43 @@ const App: React.FC = () => {
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar">
+            <div className="min-h-0 flex-1 overflow-auto p-4 custom-scrollbar">
               <div
                 className="grid min-w-[980px] gap-2 text-xs"
                 style={{ gridTemplateColumns: `220px 160px 160px repeat(${Math.max(1, petSkills.length)}, minmax(130px, 1fr))` }}
               >
-                <div className="sticky top-0 z-10 rounded-2xl bg-teal-900 px-3 py-3 font-black uppercase text-white">Học sinh</div>
+                <div className="sticky left-0 top-0 z-30 rounded-2xl bg-teal-950 px-3 py-3 font-black uppercase text-white shadow-[8px_0_18px_rgba(15,118,110,0.18)]">Học sinh</div>
                 <div className="sticky top-0 z-10 rounded-2xl bg-teal-900 px-3 py-3 text-center font-black uppercase text-white">Trứng thường</div>
                 <div className="sticky top-0 z-10 rounded-2xl bg-teal-900 px-3 py-3 text-center font-black uppercase text-white">Trứng đặc biệt</div>
                 {petSkills.map(skill => (
-                  <div key={skill.id} className="sticky top-0 z-10 rounded-2xl bg-teal-900 px-3 py-3 text-center font-black uppercase text-white" title={`${skill.name}: ${skill.description} · Giá ${skill.cost}đ`}>
+                  <button
+                    key={skill.id}
+                    type="button"
+                    onClick={() => setSelectedShopSkill(skill)}
+                    className="sticky top-0 z-10 rounded-2xl bg-teal-900 px-3 py-3 text-center font-black uppercase text-white transition-all hover:bg-teal-700 focus:outline-none focus:ring-4 focus:ring-teal-200"
+                    title={`Bấm để xem chi tiết ${skill.name}`}
+                  >
                     <span>{skill.icon}</span> {skill.name}
-                  </div>
+                  </button>
                 ))}
 
                 {currentClassStudents.map(student => {
                   const selection = shopSelections[student.id] || { skills: [] };
                   const ownedSkillIds = student.pet?.skills || [];
+                  const rank = getRank(student.points, student.gender);
                   return (
                     <React.Fragment key={student.id}>
-                      <div className="rounded-2xl border border-teal-100 bg-white p-3">
-                        <p className="font-black text-teal-950">{student.name}</p>
-                        <p className="mt-0.5 text-[10px] font-bold text-teal-700/70">{student.points}đ Hào Quang · {student.pet ? getPokemonDisplayName(student.pet) : 'Đang ấp trứng'}</p>
+                      <div className="sticky left-0 z-20 flex items-center gap-3 rounded-2xl border border-teal-100 bg-white p-3 shadow-[8px_0_18px_rgba(15,118,110,0.12)]">
+                        <img
+                          src={student.customAvatar || rank.avatar || 'https://api.dicebear.com/7.x/bottts/svg'}
+                          className="h-10 w-10 shrink-0 rounded-xl border-2 border-white object-cover shadow-sm"
+                          alt={student.name}
+                          referrerPolicy="no-referrer"
+                        />
+                        <div className="min-w-0">
+                          <p className="truncate font-black text-teal-950">{student.name}</p>
+                          <p className="mt-0.5 truncate text-[10px] font-bold text-teal-700/70">{student.points}đ Hào Quang · {student.pet ? getPokemonDisplayName(student.pet) : 'Đang ấp trứng'}</p>
+                        </div>
                       </div>
                       {(['normal', 'special'] as const).map(kind => (
                         <label key={kind} className={`flex cursor-pointer items-center justify-center rounded-2xl border p-3 font-black transition-all ${selection.egg === kind ? 'border-teal-500 bg-teal-50 text-teal-800 ring-2 ring-teal-100' : 'border-teal-100 bg-white text-stone-400 hover:border-teal-300'}`}>
@@ -5558,6 +5576,57 @@ const App: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {selectedShopSkill && (
+            <div
+              className="fixed inset-0 z-[240] flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm animate-in fade-in duration-150"
+              onMouseDown={event => {
+                if (event.target === event.currentTarget) setSelectedShopSkill(null);
+              }}
+            >
+              <div className="w-full max-w-xl rounded-[32px] border-2 border-white/80 bg-white p-6 shadow-[0_30px_90px_rgba(49,46,129,0.35)]">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.28em] text-indigo-500">Skill Detail</p>
+                    <h3 className="mt-1 flex items-center gap-2 font-royal text-3xl text-indigo-950">
+                      <span>{selectedShopSkill.icon}</span>
+                      <span>{selectedShopSkill.name}</span>
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => setSelectedShopSkill(null)}
+                    className="grid h-10 w-10 place-items-center rounded-full border border-indigo-100 bg-indigo-50 text-lg font-black text-indigo-900 hover:bg-indigo-100"
+                    aria-label="Đóng chi tiết skill"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="mt-5 space-y-4 font-sans">
+                  <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-indigo-500">Chức năng</p>
+                    <p className="mt-1 text-sm font-bold leading-relaxed text-indigo-950">{selectedShopSkill.description}</p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+                      <p className="text-[10px] font-black uppercase tracking-wider text-amber-600">Giá mua</p>
+                      <p className="mt-1 text-2xl font-black text-amber-950">{selectedShopSkill.cost}đ Hào Quang</p>
+                    </div>
+                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                      <p className="text-[10px] font-black uppercase tracking-wider text-emerald-600">Lượt dùng</p>
+                      <p className="mt-1 text-sm font-black text-emerald-950">Mỗi skill bắt đầu từ 0 lượt đã dùng và tuân theo giới hạn trong hệ thống skill hiện tại.</p>
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">Ví dụ</p>
+                    <p className="mt-1 text-sm font-bold leading-relaxed text-slate-700">
+                      Nếu học sinh mua {selectedShopSkill.name}, skill sẽ được gắn vào Pokémon đang đồng hành. Khi đến lượt cần dùng, giáo viên mở hồ sơ Linh thú của học sinh và kích hoạt skill đó theo mô tả ở trên.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
