@@ -5492,78 +5492,95 @@ const App: React.FC = () => {
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto p-4 custom-scrollbar">
-              <div
-                className="grid min-w-[980px] gap-2 text-xs"
-                style={{ gridTemplateColumns: `220px 160px 160px repeat(${Math.max(1, petSkills.length)}, minmax(130px, 1fr))` }}
+              <table
+                className="w-max min-w-full border-separate border-spacing-2 text-xs"
+                style={{ minWidth: `${540 + Math.max(1, petSkills.length) * 150}px` }}
               >
-                <div className="sticky left-0 top-0 z-30 rounded-2xl bg-teal-950 px-3 py-3 font-black uppercase text-white shadow-[8px_0_18px_rgba(15,118,110,0.18)]">Học sinh</div>
-                <div className="sticky top-0 z-10 rounded-2xl bg-teal-900 px-3 py-3 text-center font-black uppercase text-white">Trứng thường</div>
-                <div className="sticky top-0 z-10 rounded-2xl bg-teal-900 px-3 py-3 text-center font-black uppercase text-white">Trứng đặc biệt</div>
-                {petSkills.map(skill => (
-                  <button
-                    key={skill.id}
-                    type="button"
-                    onClick={() => setSelectedShopSkill(skill)}
-                    className="sticky top-0 z-10 rounded-2xl bg-teal-900 px-3 py-3 text-center font-black uppercase text-white transition-all hover:bg-teal-700 focus:outline-none focus:ring-4 focus:ring-teal-200"
-                    title={`Bấm để xem chi tiết ${skill.name}`}
-                  >
-                    <span>{skill.icon}</span> {skill.name}
-                  </button>
-                ))}
-
-                {currentClassStudents.map(student => {
-                  const selection = shopSelections[student.id] || { skills: [] };
-                  const ownedSkillIds = student.pet?.skills || [];
-                  const rank = getRank(student.points, student.gender);
-                  return (
-                    <React.Fragment key={student.id}>
-                      <div className="sticky left-0 z-20 flex items-center gap-3 rounded-2xl border border-teal-100 bg-white p-3 shadow-[8px_0_18px_rgba(15,118,110,0.12)]">
-                        <img
-                          src={student.customAvatar || rank.avatar || 'https://api.dicebear.com/7.x/bottts/svg'}
-                          className="h-10 w-10 shrink-0 rounded-xl border-2 border-white object-cover shadow-sm"
-                          alt={student.name}
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="min-w-0">
-                          <p className="truncate font-black text-teal-950">{student.name}</p>
-                          <p className="mt-0.5 truncate text-[10px] font-bold text-teal-700/70">{student.points}đ Hào Quang · {student.pet ? getPokemonDisplayName(student.pet) : 'Đang ấp trứng'}</p>
-                        </div>
-                      </div>
-                      {(['normal', 'special'] as const).map(kind => (
-                        <label key={kind} className={`flex cursor-pointer items-center justify-center rounded-2xl border p-3 font-black transition-all ${selection.egg === kind ? 'border-teal-500 bg-teal-50 text-teal-800 ring-2 ring-teal-100' : 'border-teal-100 bg-white text-stone-400 hover:border-teal-300'}`}>
-                          <input
-                            type="checkbox"
-                            checked={selection.egg === kind}
-                            onChange={() => toggleShopEgg(student.id, kind)}
-                            className="mr-2 h-4 w-4 accent-teal-600"
-                          />
-                          {kind === 'special' ? '20đ' : '10đ'}
-                        </label>
-                      ))}
-                      {petSkills.map(skill => {
-                        const disabled = !student.pet || ownedSkillIds.includes(skill.id);
-                        const checked = selection.skills.includes(skill.id);
-                        return (
-                          <label
-                            key={skill.id}
-                            title={`${skill.name}: ${skill.description} · Giá ${skill.cost}đ${disabled ? student.pet ? ' · Đã sở hữu' : ' · Cần có Pokémon active' : ''}`}
-                            className={`flex cursor-pointer items-center justify-center rounded-2xl border p-3 text-center font-black transition-all ${checked ? 'border-indigo-500 bg-indigo-50 text-indigo-800 ring-2 ring-indigo-100' : 'border-teal-100 bg-white text-stone-400 hover:border-indigo-300'} ${disabled ? 'cursor-not-allowed opacity-45' : ''}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              disabled={disabled}
-                              onChange={() => toggleShopSkill(student.id, skill.id)}
-                              className="mr-2 h-4 w-4 accent-indigo-600"
+                <thead>
+                  <tr>
+                    <th className="sticky left-0 top-0 z-40 w-[220px] min-w-[220px] rounded-2xl bg-teal-950 px-3 py-3 text-left font-black uppercase text-white shadow-[10px_0_22px_rgba(15,118,110,0.22)]">
+                      Học sinh
+                    </th>
+                    <th className="sticky top-0 z-20 w-[150px] min-w-[150px] rounded-2xl bg-teal-900 px-3 py-3 text-center font-black uppercase text-white">
+                      Trứng thường
+                    </th>
+                    <th className="sticky top-0 z-20 w-[150px] min-w-[150px] rounded-2xl bg-teal-900 px-3 py-3 text-center font-black uppercase text-white">
+                      Trứng đặc biệt
+                    </th>
+                    {petSkills.map(skill => (
+                      <th key={skill.id} className="sticky top-0 z-20 w-[150px] min-w-[150px] rounded-2xl bg-teal-900 p-0 text-center font-black uppercase text-white">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedShopSkill(skill)}
+                          className="h-full w-full rounded-2xl px-3 py-3 font-black uppercase text-white transition-all hover:bg-teal-700 focus:outline-none focus:ring-4 focus:ring-teal-200"
+                          title={`Bấm để xem chi tiết ${skill.name}`}
+                        >
+                          <span>{skill.icon}</span> {skill.name}
+                        </button>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {currentClassStudents.map(student => {
+                    const selection = shopSelections[student.id] || { skills: [] };
+                    const ownedSkillIds = student.pet?.skills || [];
+                    const rank = getRank(student.points, student.gender);
+                    return (
+                      <tr key={student.id}>
+                        <td className="sticky left-0 z-30 w-[220px] min-w-[220px] rounded-2xl border border-teal-100 bg-white p-3 shadow-[10px_0_22px_rgba(15,118,110,0.16)]">
+                          <div className="flex items-center gap-3">
+                            <img
+                              src={student.customAvatar || rank.avatar || 'https://api.dicebear.com/7.x/bottts/svg'}
+                              className="h-10 w-10 shrink-0 rounded-xl border-2 border-white object-cover shadow-sm"
+                              alt={student.name}
+                              referrerPolicy="no-referrer"
                             />
-                            {skill.cost}đ
-                          </label>
-                        );
-                      })}
-                    </React.Fragment>
-                  );
-                })}
-              </div>
+                            <div className="min-w-0">
+                              <p className="truncate font-black text-teal-950">{student.name}</p>
+                              <p className="mt-0.5 truncate text-[10px] font-bold text-teal-700/70">{student.points}đ Hào Quang · {student.pet ? getPokemonDisplayName(student.pet) : 'Đang ấp trứng'}</p>
+                            </div>
+                          </div>
+                        </td>
+                        {(['normal', 'special'] as const).map(kind => (
+                          <td key={kind} className="w-[150px] min-w-[150px]">
+                            <label className={`flex min-h-[68px] cursor-pointer items-center justify-center rounded-2xl border p-3 font-black transition-all ${selection.egg === kind ? 'border-teal-500 bg-teal-50 text-teal-800 ring-2 ring-teal-100' : 'border-teal-100 bg-white text-stone-400 hover:border-teal-300'}`}>
+                              <input
+                                type="checkbox"
+                                checked={selection.egg === kind}
+                                onChange={() => toggleShopEgg(student.id, kind)}
+                                className="mr-2 h-4 w-4 accent-teal-600"
+                              />
+                              {kind === 'special' ? '20đ' : '10đ'}
+                            </label>
+                          </td>
+                        ))}
+                        {petSkills.map(skill => {
+                          const disabled = !student.pet || ownedSkillIds.includes(skill.id);
+                          const checked = selection.skills.includes(skill.id);
+                          return (
+                            <td key={skill.id} className="w-[150px] min-w-[150px]">
+                              <label
+                                title={`${skill.name}: ${skill.description} · Giá ${skill.cost}đ${disabled ? student.pet ? ' · Đã sở hữu' : ' · Cần có Pokémon active' : ''}`}
+                                className={`flex min-h-[68px] cursor-pointer items-center justify-center rounded-2xl border p-3 text-center font-black transition-all ${checked ? 'border-indigo-500 bg-indigo-50 text-indigo-800 ring-2 ring-indigo-100' : 'border-teal-100 bg-white text-stone-400 hover:border-indigo-300'} ${disabled ? 'cursor-not-allowed opacity-45' : ''}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={disabled}
+                                  onChange={() => toggleShopSkill(student.id, skill.id)}
+                                  className="mr-2 h-4 w-4 accent-indigo-600"
+                                />
+                                {skill.cost}đ
+                              </label>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-teal-100 bg-white/80 p-5">
