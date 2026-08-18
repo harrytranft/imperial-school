@@ -11,9 +11,19 @@ interface StudentCardProps {
   onSelect: (student: Student) => void;
   petSkills: PetSkill[];
   isSelected?: boolean;
+  isDimmed?: boolean;
+  onHoverChange?: (studentId: string | null) => void;
 }
 
-export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSelect, petSkills, isSelected }) => {
+export const StudentCard: React.FC<StudentCardProps> = ({
+  student,
+  getRank,
+  onSelect,
+  petSkills,
+  isSelected,
+  isDimmed,
+  onHoverChange
+}) => {
   getRank(student.points, student.gender);
   const isAbsent = student.isAbsent;
 
@@ -41,13 +51,15 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
   return (
     <div 
       onClick={() => onSelect(student)}
+      onMouseEnter={() => onHoverChange?.(student.id)}
+      onMouseLeave={() => onHoverChange?.(null)}
       className={`relative h-[360px] rounded-[32px] p-5 cursor-pointer flex flex-col gap-4 transition-all duration-300 border-2 backdrop-blur-xl group ${
         isSelected 
           ? 'border-red-800 bg-red-100/90 ring-8 ring-red-800/20 shadow-2xl scale-[1.02] -translate-y-2' 
           : isAbsent 
             ? 'bg-stone-100/80 grayscale border-stone-300 opacity-60 shadow-xs' 
-            : 'bg-white/85 border-white/90 shadow-[0_10px_30px_rgba(120,20,20,0.07)] hover:shadow-[0_25px_50px_-10px_rgba(180,30,30,0.25)] hover:border-amber-400 hover:-translate-y-3 hover:scale-[1.025] hover:bg-white/95'
-      }`}
+            : 'bg-white/85 border-white/90 shadow-[0_10px_30px_rgba(120,20,20,0.07)] hover:border-cyan-300 hover:-translate-y-3 hover:scale-[1.035] hover:bg-white hover:shadow-[0_0_0_3px_rgba(34,211,238,0.35),0_28px_70px_-12px_rgba(14,165,233,0.55),0_0_55px_rgba(250,204,21,0.35)]'
+      } ${isDimmed ? 'opacity-35 brightness-75 saturate-50 scale-[0.98]' : ''}`}
     >
       <div className={`absolute top-0 right-0 px-4 py-2 text-[9px] rounded-bl-2xl uppercase font-black tracking-widest ${isSelected ? 'bg-red-800 text-white shadow-md' : 'bg-amber-100/80 text-amber-900 border-b border-l border-amber-200/60'}`}>
         {student.className}
