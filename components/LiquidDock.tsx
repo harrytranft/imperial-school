@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 interface DockItem {
   id: string;
@@ -15,6 +15,7 @@ interface LiquidDockProps {
   onRandom: () => void;
   onLudo: () => void;
   onLuckyWheel: () => void;
+  onShop: () => void;
   onGroup: () => void;
   onTimer: () => void;
   onSelectAll: () => void;
@@ -22,18 +23,64 @@ interface LiquidDockProps {
   onToggleMultiSelect: () => void;
   onResetAura: () => void;
   selectedCount: number;
-  user: any;
   isSyncing: boolean;
-  onBackup: () => void;
-  onRestore: () => void;
+  lastSyncedTime: number | null;
   onOpenFeedback: () => void;
   onDeleteSelected: () => void;
 }
+
+const formatVietnamTime = (date: Date) => new Intl.DateTimeFormat('vi-VN', {
+  timeZone: 'Asia/Ho_Chi_Minh',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false
+}).format(date);
+
+const getVietnamClockParts = (date: Date) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    hour12: false
+  }).formatToParts(date);
+  const get = (type: string) => Number(parts.find(part => part.type === type)?.value || 0);
+  return {
+    hour: get('hour') % 24,
+    minute: get('minute'),
+    second: get('second')
+  };
+};
+
+const AnalogClockIcon: React.FC<{ now: Date }> = ({ now }) => {
+  const { hour, minute, second } = getVietnamClockParts(now);
+  const hourDeg = ((hour % 12) * 30) + (minute * 0.5);
+  const minuteDeg = minute * 6;
+  const secondDeg = second * 6;
+
+  return (
+    <div className="relative h-10 w-10 rounded-full bg-black shadow-inner ring-2 ring-white/60">
+      {[...Array(12)].map((_, index) => (
+        <span
+          key={index}
+          className="absolute left-1/2 top-1/2 h-1 w-0.5 origin-[50%_18px] rounded-full bg-white/70"
+          style={{ transform: `translate(-50%, -50%) rotate(${index * 30}deg) translateY(-16px)` }}
+        />
+      ))}
+      <span className="absolute left-1/2 top-1/2 h-2.5 w-1 origin-bottom rounded-full bg-white" style={{ transform: `translate(-50%, -100%) rotate(${hourDeg}deg)` }} />
+      <span className="absolute left-1/2 top-1/2 h-3.5 w-0.5 origin-bottom rounded-full bg-white" style={{ transform: `translate(-50%, -100%) rotate(${minuteDeg}deg)` }} />
+      <span className="absolute left-1/2 top-1/2 h-4 w-px origin-bottom rounded-full bg-amber-400" style={{ transform: `translate(-50%, -100%) rotate(${secondDeg}deg)` }} />
+      <span className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-400 ring-2 ring-white" />
+    </div>
+  );
+};
 
 export const LiquidDock: React.FC<LiquidDockProps> = ({
   onRandom,
   onLudo,
   onLuckyWheel,
+  onShop,
   onGroup,
   onTimer,
   onSelectAll,
@@ -41,14 +88,18 @@ export const LiquidDock: React.FC<LiquidDockProps> = ({
   onToggleMultiSelect,
   onResetAura,
   selectedCount,
-  user,
   isSyncing,
-  onBackup,
-  onRestore,
+  lastSyncedTime,
   onOpenFeedback,
   onDeleteSelected,
 }) => {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Define dock items with cohesive Imperial Glass colors
   const mainItems: DockItem[] = [
@@ -72,6 +123,13 @@ export const LiquidDock: React.FC<LiquidDockProps> = ({
       icon: '🎡',
       onClick: onLuckyWheel,
       color: 'from-rose-400 via-fuchsia-500 to-purple-700',
+    },
+    {
+      id: 'shop',
+      label: 'Shop',
+      icon: '🛒',
+      onClick: onShop,
+      color: 'from-cyan-300 via-emerald-400 to-teal-700',
     },
     {
       id: 'group',
@@ -113,26 +171,13 @@ export const LiquidDock: React.FC<LiquidDockProps> = ({
     },
   ];
 
-  const cloudItems: DockItem[] = user ? [
-    {
-      id: 'backup',
-      label: 'Sao Lưu Đám Mây',
-      icon: '☁️',
-      onClick: onBackup,
-      disabled: isSyncing,
-      color: 'from-amber-200 via-yellow-400 to-amber-500',
-    },
-    {
-      id: 'restore',
-      label: 'Khôi Phục Dữ Liệu',
-      icon: '🔄',
-      onClick: onRestore,
-      disabled: isSyncing,
-      color: 'from-amber-200 via-orange-300 to-amber-500',
-    },
-  ] : [];
-
-  const items = [...mainItems, ...cloudItems];
+  const items = mainItems;
+  const clockIndex = items.length;
+  const syncLabel = isSyncing
+    ? 'Đang đồng bộ'
+    : lastSyncedTime
+      ? `Sync gần nhất: ${new Date(lastSyncedTime).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+      : 'Chưa có lần sync';
 
   // Magnification curve calculation
   const getItemSize = (index: number) => {
@@ -170,11 +215,6 @@ export const LiquidDock: React.FC<LiquidDockProps> = ({
 
           return (
             <React.Fragment key={item.id}>
-              {/* Divider before cloud items */}
-              {user && idx === mainItems.length && (
-                <div className="h-8 w-[1.5px] bg-gradient-to-b from-amber-400/20 via-amber-900/30 to-amber-400/20 mx-1 shrink-0" />
-              )}
-
               <div 
                 className="relative group flex flex-col items-center justify-end shrink-0 cursor-pointer"
                 onMouseEnter={() => setHoveredIndex(idx)}
@@ -216,6 +256,29 @@ export const LiquidDock: React.FC<LiquidDockProps> = ({
             </React.Fragment>
           );
         })}
+
+        <div className="h-8 w-[1.5px] bg-gradient-to-b from-red-400/20 via-red-900/30 to-red-400/20 mx-1 shrink-0" />
+
+        <div
+          className="relative group flex flex-col items-center justify-end shrink-0 cursor-default"
+          onMouseEnter={() => setHoveredIndex(clockIndex)}
+        >
+          {hoveredIndex === clockIndex && (
+            <div className="absolute -top-20 left-1/2 -translate-x-1/2 whitespace-nowrap bg-red-950/90 text-amber-200 border border-amber-400/60 px-3 py-2 rounded-2xl text-[11px] font-black uppercase tracking-wider shadow-xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-150 pointer-events-none z-50">
+              <div>GMT+7: {formatVietnamTime(now)}</div>
+              <div className="mt-0.5 text-[9px] text-amber-100/70 normal-case tracking-normal">{syncLabel}</div>
+            </div>
+          )}
+          <button
+            type="button"
+            style={{ width: `${getItemSize(clockIndex)}px`, height: `${getItemSize(clockIndex)}px` }}
+            className="relative rounded-2xl flex items-center justify-center transition-all duration-200 ease-out shadow-lg border border-white/80 bg-gradient-to-br from-stone-950 via-black to-stone-800 hover:shadow-2xl"
+            title={`GMT+7: ${formatVietnamTime(now)} · ${syncLabel}`}
+          >
+            <div className="absolute inset-0 rounded-2xl bg-gradient-to-tr from-transparent via-white/10 to-white/30 pointer-events-none" />
+            <AnalogClockIcon now={now} />
+          </button>
+        </div>
 
         {/* MULTI-SELECT ACTIONS BADGE BUTTONS */}
         {isMultiSelectMode && selectedCount > 0 && (

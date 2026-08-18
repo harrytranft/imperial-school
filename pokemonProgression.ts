@@ -144,6 +144,8 @@ export const getDefaultPokemonProgress = (): StudentPokemonProgress => ({
   bestBattleWinStreak: 0,
   homeworkStreak: 0,
   bestHomeworkStreak: 0,
+  attendanceStreak: 0,
+  bestAttendanceStreak: 0,
   positiveSoloCount: 0,
   battleWins: 0
 });

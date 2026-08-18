@@ -19,7 +19,9 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
   const egg = student.egg;
   const pet = student.pet;
   const progress = student.pokemonProgress;
+  const eggRequiredProgress = egg?.requiredProgress || 10;
   const streakBadges = [
+    { key: 'attendance', label: 'Đi học', value: progress?.attendanceStreak || 0, tone: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
     { key: 'answer', label: 'Answer', value: progress?.answerStreak || 0, tone: 'bg-sky-50 text-sky-700 border-sky-200' },
     { key: 'battle', label: 'Battle', value: progress?.battleWinStreak || 0, tone: 'bg-violet-50 text-violet-700 border-violet-200' },
     { key: 'homework', label: 'Homework', value: progress?.homeworkStreak || 0, tone: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
@@ -27,9 +29,9 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
 
   // Helper to determine egg appearance based on hatch progress
   const getEggStatusText = (progress: number) => {
-    if (progress >= 10) return { emoji: '🐣', label: 'Sẵn sàng nở!', color: 'text-green-600' };
-    if (progress >= 7) return { emoji: '🥚💥', label: 'Nứt sâu, rục rịch!', color: 'text-orange-500 animate-pulse' };
-    if (progress >= 4) return { emoji: '🥚⚡', label: 'Nứt nhẹ rạn vỏ', color: 'text-amber-500' };
+    if (progress >= eggRequiredProgress) return { emoji: '🐣', label: 'Sẵn sàng nở!', color: 'text-green-600' };
+    if (progress >= Math.ceil(eggRequiredProgress * 0.7)) return { emoji: '🥚💥', label: 'Nứt sâu, rục rịch!', color: 'text-orange-500 animate-pulse' };
+    if (progress >= Math.ceil(eggRequiredProgress * 0.4)) return { emoji: '🥚⚡', label: 'Nứt nhẹ rạn vỏ', color: 'text-amber-500' };
     return { emoji: '🥚', label: 'Trứng nguyên vẹn', color: 'text-gray-400' };
   };
 
@@ -161,18 +163,18 @@ export const StudentCard: React.FC<StudentCardProps> = ({ student, getRank, onSe
           </>
         ) : (
           <>
-            <div className={`text-2xl transform transition-transform duration-500 hover:rotate-12 ${egg && egg.progress >= 7 ? 'animate-bounce' : ''}`}>
+            <div className={`text-2xl transform transition-transform duration-500 hover:rotate-12 ${egg && egg.progress >= Math.ceil(eggRequiredProgress * 0.7) ? 'animate-bounce' : ''}`}>
               {eggStatus.emoji}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex justify-between items-center text-[10px]">
                 <span className="font-bold text-gray-600">Ấp Trứng Pokémon</span>
-                <span className={`font-black ${eggStatus.color}`}>{egg ? egg.progress : 0}/10đ</span>
+                <span className={`font-black ${eggStatus.color}`}>{egg ? egg.progress : 0}/{eggRequiredProgress}đ</span>
               </div>
               <div className="w-full bg-gray-200 h-1.5 rounded-full overflow-hidden mt-1 max-w-full">
                 <div 
                   className="bg-amber-500 h-full rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, Math.max(0, ((egg ? egg.progress : 0) / 10) * 100))}%` }}
+                  style={{ width: `${Math.min(100, Math.max(0, ((egg ? egg.progress : 0) / eggRequiredProgress) * 100))}%` }}
                 />
               </div>
               <p className="text-[8px] text-gray-400 mt-0.5 truncate italic">{eggStatus.label}</p>

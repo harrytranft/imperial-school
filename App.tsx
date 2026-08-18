@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Student, Gender, HistoryItem, RankInfo, Skill, PokemonPet, PokemonReleaseEvent, LudoTileSpec, LuckyWheelReward, LuckyWheelRewardType } from './types';
+import { Student, Gender, HistoryItem, RankInfo, Skill, PokemonPet, PokemonReleaseEvent, LudoTileSpec, LuckyWheelReward, LuckyWheelRewardType, StudentEgg, AttendanceStatus } from './types';
 import { 
   STORAGE_KEY, DEFAULT_RANKS_MALE, DEFAULT_RANKS_FEMALE, 
   RANKS_KEY_MALE, RANKS_KEY_FEMALE, DEFAULT_SKILLS, SKILLS_KEY,
@@ -10,6 +10,7 @@ import {
 } from './constants';
 import { StudentCard } from './components/StudentCard';
 import { LiquidDock } from './components/LiquidDock';
+import { StatusDock } from './components/StatusDock';
 import { AttendanceCheckModal } from './components/AttendanceCheckModal';
 import { HomeworkCheckModal } from './components/HomeworkCheckModal';
 import { HomeworkStatus } from './components/HomeworkCheckModal';
@@ -18,6 +19,7 @@ import { PokemonPassiveBadge } from './components/PokemonPassiveBadge';
 import { PokemonReactionToast } from './components/PokemonReactionToast';
 import { generateEdict } from './geminiService';
 import { LIST_POKEMONS, LIST_PET_SKILLS as DEFAULT_PET_SKILLS, PetSkill, getRandomPokemon } from './pokemonData';
+import { getPassiveDefinition, getPassiveIcon } from './pokemonPassives';
 import { useAuth } from './AuthContext';
 import { fetchUserSettings, upsertUserSettings } from './supabaseData';
 import { applyGameEventToStudent, applyPetHpDeltaToStudent, GameEventSource, PokemonUiEvent } from './gameEvents';
@@ -56,6 +58,17 @@ interface LevelUpAnnouncement {
 interface BattleLudoTurn {
   studentId: string;
   role: 'winner' | 'loser' | 'draw';
+}
+
+interface ShopReviewItem {
+  studentId: string;
+  studentName: string;
+  pointBalance: number;
+  egg?: 'normal' | 'special';
+  skillIds: string[];
+  itemLabels: string[];
+  totalCost: number;
+  canAfford: boolean;
 }
 
 const getLocalDateKey = (date = new Date()) => {
@@ -298,8 +311,12 @@ const App: React.FC = () => {
   const [showRandomModal, setShowRandomModal] = useState(false);
   const [randomStudent, setRandomStudent] = useState<Student | null>(null);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+  const [attendanceStatuses, setAttendanceStatuses] = useState<Record<string, AttendanceStatus>>({});
   const [showHomeworkModal, setShowHomeworkModal] = useState(false);
   const [homeworkStatuses, setHomeworkStatuses] = useState<Record<string, HomeworkStatus>>({});
+  const [showShopModal, setShowShopModal] = useState(false);
+  const [shopSelections, setShopSelections] = useState<Record<string, { egg?: 'normal' | 'special'; skills: string[] }>>({});
+  const [shopReview, setShopReview] = useState<ShopReviewItem[] | null>(null);
   const [randomMode, setRandomMode] = useState<'solo' | 'battle'>('solo');
   const [battleStudentA, setBattleStudentA] = useState<Student | null>(null);
   const [battleStudentB, setBattleStudentB] = useState<Student | null>(null);
@@ -714,20 +731,6 @@ const App: React.FC = () => {
     localStorage.setItem(PET_SKILLS_KEY, JSON.stringify(petSkills));
   }, [petSkills]);
 
-  // Remind user to backup to cloud before leaving/closing tab
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "Hãy chắc chắn quý Quan trường đã sao lưu dữ liệu lên Đám mây (Backup to Cloud) trước khi thoát điện!";
-      return e.returnValue;
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, []);
-
-
   // Persistence (Guest Mode)
   useEffect(() => {
     if (authLoading) return;
@@ -739,13 +742,15 @@ const App: React.FC = () => {
           const parsed: Student[] = JSON.parse(saved);
           const migrated = parsed.map(s => {
             if (!s.egg && !s.pet) {
-              const randomDexId = LIST_POKEMONS[Math.floor(Math.random() * LIST_POKEMONS.length)].dexId;
+              const randomPokemon = getRandomPokemon();
               return {
                 ...s,
                 egg: {
                   progress: 0,
                   status: 'egg' as const,
-                  assignedDexId: randomDexId
+                  assignedDexId: randomPokemon.dexId,
+                  kind: 'normal' as const,
+                  requiredProgress: 10
                 }
               };
             }
@@ -912,6 +917,69 @@ const App: React.FC = () => {
     return Math.floor(Math.random() * length);
   };
 
+  const SPECIAL_POKEMON_DEX_IDS = new Set([
+    144, 145, 146, 150, 151, 243, 244, 245, 249, 250, 251, 377, 378, 379, 380, 381, 382, 383, 384, 385, 386,
+    480, 481, 482, 483, 484, 485, 486, 487, 488, 491, 492, 493, 494, 638, 639, 640, 641, 642, 643, 644, 645,
+    646, 647, 648, 649, 716, 717, 718, 719, 720, 721, 772, 773, 785, 786, 787, 788, 789, 790, 791, 792,
+    800, 801, 802, 807, 808, 809, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 905, 1001, 1002,
+    1003, 1004, 1007, 1008, 1009, 1010, 1014, 1015, 1016, 1017, 1020, 1021, 1022, 1023, 1024, 1025
+  ]);
+
+  const getEggRequiredProgress = (egg?: StudentEgg): number => egg?.requiredProgress || (egg?.kind === 'special' ? 15 : 10);
+  const getEggLabel = (kind: 'normal' | 'special') => kind === 'special' ? 'Trứng đặc biệt' : 'Trứng thường';
+  const getEggCost = (kind: 'normal' | 'special') => kind === 'special' ? 20 : 10;
+
+  const getRandomEggDexId = (kind: 'normal' | 'special' = 'normal') => {
+    const specialPool = LIST_POKEMONS.filter(pokemon => SPECIAL_POKEMON_DEX_IDS.has(pokemon.dexId));
+    const normalPool = LIST_POKEMONS.filter(pokemon => !SPECIAL_POKEMON_DEX_IDS.has(pokemon.dexId));
+    const useSpecialPool = kind === 'special' || getRandomIndex(100) >= 80;
+    const pool = useSpecialPool && specialPool.length > 0 ? specialPool : normalPool.length > 0 ? normalPool : LIST_POKEMONS;
+    return pool[getRandomIndex(pool.length)]?.dexId || 25;
+  };
+
+  const createEgg = (kind: 'normal' | 'special' = 'normal'): StudentEgg => ({
+    progress: 0,
+    status: 'egg',
+    assignedDexId: getRandomEggDexId(kind),
+    kind,
+    requiredProgress: kind === 'special' ? 15 : 10
+  });
+
+  const advanceEggForStudent = (student: Student, amount: number) => {
+    let currentEgg = student.egg ? { ...student.egg } : createEgg('normal');
+    let currentStudent = student;
+    let hatchedPet: PokemonPet | null = null;
+
+    if (amount > 0 && currentEgg.status === 'egg') {
+      const requiredProgress = getEggRequiredProgress(currentEgg);
+      const nextProgress = currentEgg.progress + amount;
+      currentEgg = {
+        ...currentEgg,
+        requiredProgress,
+        progress: Math.min(requiredProgress, nextProgress)
+      };
+
+      if (currentEgg.progress >= requiredProgress) {
+        currentEgg.status = 'hatched';
+        hatchedPet = createPokemonPetFromDexId(currentEgg.assignedDexId);
+        currentStudent = {
+          ...currentStudent,
+          pet: hatchedPet,
+          pets: [hatchedPet, ...(currentStudent.pets || []).filter(p => !isSamePokemon(p, hatchedPet))]
+        };
+      }
+    }
+
+    return {
+      student: {
+        ...currentStudent,
+        egg: currentEgg
+      },
+      egg: currentEgg,
+      hatchedPet
+    };
+  };
+
   const shuffleLuckyWheelRewards = (rewards: LuckyWheelReward[]) => {
     const next = [...rewards];
     for (let i = next.length - 1; i > 0; i -= 1) {
@@ -1010,23 +1078,11 @@ const App: React.FC = () => {
           generateEdict(s.name, newRank.title, newPoints > s.points).then(setEdict);
         }
 
-        let currentEgg = s.egg ? { ...s.egg } : { progress: 0, status: 'egg' as const, assignedDexId: LIST_POKEMONS[Math.floor(Math.random() * LIST_POKEMONS.length)].dexId };
         let currentStudent = normalizeStudentPokemonData(s);
-
-        if (amount > 0 && currentEgg.status === 'egg') {
-          const nextProgress = currentEgg.progress + amount;
-          currentEgg.progress = Math.min(10, nextProgress);
-
-          if (currentEgg.progress >= 10) {
-            currentEgg.status = 'hatched';
-            const hatchedPet = createPokemonPetFromDexId(currentEgg.assignedDexId);
-            currentStudent = {
-              ...currentStudent,
-              pet: hatchedPet,
-              pets: [hatchedPet, ...(currentStudent.pets || []).filter(p => !isSamePokemon(p, hatchedPet))]
-            };
-            hatchedNames.push(s.name);
-          }
+        const eggResult = advanceEggForStudent(currentStudent, amount);
+        currentStudent = eggResult.student;
+        if (eggResult.hatchedPet) {
+          hatchedNames.push(s.name);
         }
 
         if (currentStudent.pet && amount !== 0) {
@@ -1059,7 +1115,7 @@ const App: React.FC = () => {
           ...currentStudent,
           points: newPoints,
           history: [history, ...currentStudent.history].slice(0, 50),
-          egg: currentEgg
+          egg: eggResult.egg
         };
       }
       return s;
@@ -1179,17 +1235,21 @@ const App: React.FC = () => {
     setStudents(updatedStudents);
   };
 
-  const handleBuyNewEgg = (studentId: string) => {
+  const handleBuyNewEgg = (
+    studentId: string,
+    kind: 'normal' | 'special' = 'normal',
+    options: { skipConfirm?: boolean; silent?: boolean } = {}
+  ) => {
     const s = students.find(x => x.id === studentId);
     if (!s) return false;
-    const cost = 10;
+    const cost = getEggCost(kind);
+    const eggLabel = getEggLabel(kind);
+    const requiredProgress = kind === 'special' ? 15 : 10;
     if (s.points < cost) {
-      alert(`Không đủ Hào quang! Học sĩ cần tối thiểu ${cost} điểm để thỉnh Quả trứng mới.`);
+      alert(`Không đủ Hào quang! Học sĩ cần tối thiểu ${cost} điểm để thỉnh ${eggLabel}.`);
       return false;
     }
-    if (!window.confirm(`Bạn có đồng ý thỉnh thêm một quả Quả Trứng Pokemon mới bằng cách tiêu hao 10đ Hào Quang?`)) return false;
-
-    const randomDexId = LIST_POKEMONS[Math.floor(Math.random() * LIST_POKEMONS.length)].dexId;
+    if (!options.skipConfirm && !window.confirm(`Bạn có đồng ý thỉnh ${eggLabel} bằng cách tiêu hao ${cost}đ Hào Quang? Trứng này cần +${requiredProgress} Hào Quang để nở.`)) return false;
     
     // Save current companion in collection
     const currentActivePet = s.pet;
@@ -1205,28 +1265,179 @@ const App: React.FC = () => {
     const historyItem: HistoryItem = {
       id: Date.now().toString() + Math.random(),
       amount: -cost,
-      reason: "Thỉnh Quả Trứng Pokemon cổ đại mới",
+      reason: `Thỉnh ${eggLabel} Pokémon mới (-${cost}đ)`,
       timestamp: Date.now()
     };
 
     const updatedS: Student = {
       ...s,
       points: nextPoints,
-      egg: {
-        progress: 0,
-        status: 'egg' as const,
-        assignedDexId: randomDexId
-      },
+      egg: createEgg(kind),
       pet: undefined, // Clear active pet so they see incubating layout
       pets: ownedPets,
       history: [historyItem, ...s.history].slice(0, 50)
     };
 
     setStudents(prev => prev.map(x => x.id === studentId ? updatedS : x));
-    setEditingStudent(updatedS);
+    if (editingStudent?.id === studentId) setEditingStudent(updatedS);
     new Audio(posSoundUrl).play().catch(() => {});
-    alert("Mua trứng cổ đại thế hệ mới thành công! Hãy tích cực cộng điểm giúp sinh linh sớm thức tỉnh vỏ trứng.");
+    if (!options.silent) {
+      alert(`Mua ${eggLabel} thành công! Hãy tích cực cộng điểm để sinh linh sớm thức tỉnh khỏi vỏ trứng.`);
+    }
     return true;
+  };
+
+  const handleOpenShop = () => {
+    if (currentClassStudents.length === 0) {
+      alert('Chưa có học sinh trong lớp hiện tại để mở Shop.');
+      return;
+    }
+    setShopSelections({});
+    setShopReview(null);
+    setShowShopModal(true);
+  };
+
+  const toggleShopEgg = (studentId: string, kind: 'normal' | 'special') => {
+    setShopSelections(prev => {
+      const current = prev[studentId] || { skills: [] };
+      return {
+        ...prev,
+        [studentId]: {
+          ...current,
+          egg: current.egg === kind ? undefined : kind
+        }
+      };
+    });
+  };
+
+  const toggleShopSkill = (studentId: string, skillId: string) => {
+    setShopSelections(prev => {
+      const current = prev[studentId] || { skills: [] };
+      const hasSkill = current.skills.includes(skillId);
+      return {
+        ...prev,
+        [studentId]: {
+          ...current,
+          skills: hasSkill ? current.skills.filter(id => id !== skillId) : [...current.skills, skillId]
+        }
+      };
+    });
+  };
+
+  const buildShopReview = (): ShopReviewItem[] => currentClassStudents
+    .map(student => {
+      const selection = shopSelections[student.id] || { skills: [] };
+      const ownedSkillIds = student.pet?.skills || [];
+      const skillIds = selection.skills.filter(skillId => student.pet && !ownedSkillIds.includes(skillId));
+      const selectedSkills = skillIds
+        .map(skillId => petSkills.find(skill => skill.id === skillId))
+        .filter(Boolean) as PetSkill[];
+      const skillCost = selectedSkills.reduce((sum, skill) => sum + skill.cost, 0);
+      const eggCost = selection.egg ? getEggCost(selection.egg) : 0;
+      const totalCost = skillCost + eggCost;
+      const itemLabels = [
+        ...selectedSkills.map(skill => `${skill.icon} ${skill.name}`),
+        ...(selection.egg ? [`🥚 ${getEggLabel(selection.egg)}`] : [])
+      ];
+
+      return {
+        studentId: student.id,
+        studentName: student.name,
+        pointBalance: student.points,
+        egg: selection.egg,
+        skillIds,
+        itemLabels,
+        totalCost,
+        canAfford: totalCost > 0 && student.points >= totalCost
+      };
+    })
+    .filter(item => item.totalCost > 0);
+
+  const handlePrepareShopPurchase = () => {
+    const reviewItems = buildShopReview();
+    if (reviewItems.length === 0) {
+      alert('Chưa tick món nào trong Shop.');
+      return;
+    }
+    setShopReview(reviewItems);
+  };
+
+  const handleConfirmShopPurchase = () => {
+    if (!shopReview) return;
+    const purchasableItems = shopReview.filter(item => item.canAfford);
+    if (purchasableItems.length === 0) {
+      alert('Chưa có học sinh nào đủ Hào Quang để mua các món đã chọn.');
+      return;
+    }
+    const purchaseMap = new Map(purchasableItems.map(item => [item.studentId, item]));
+    const timestamp = Date.now();
+
+    const updatedStudents = students.map(student => {
+      const item = purchaseMap.get(student.id);
+      if (!item) return student;
+
+      let updatedStudent = normalizeStudentPokemonData(student);
+      let updatedPet = updatedStudent.pet;
+      const historyItems: HistoryItem[] = [];
+
+      if (updatedPet && item.skillIds.length > 0) {
+        const currentUses = updatedPet.skillUses ? { ...updatedPet.skillUses } : {};
+        item.skillIds.forEach(skillId => {
+          currentUses[skillId] = 0;
+        });
+        updatedPet = {
+          ...updatedPet,
+          skills: [...(updatedPet.skills || []), ...item.skillIds],
+          skillUses: currentUses
+        };
+        updatedStudent = {
+          ...updatedStudent,
+          pet: updatedPet,
+          pets: updatePetInCollection(updatedStudent, updatedPet)
+        };
+      }
+
+      if (item.egg) {
+        const currentActivePet = updatedStudent.pet;
+        let ownedPets = updatedStudent.pets ? [...updatedStudent.pets] : [];
+        if (currentActivePet && !ownedPets.some(p => isSamePokemon(p, currentActivePet))) {
+          ownedPets.push(currentActivePet);
+        }
+        updatedStudent = {
+          ...updatedStudent,
+          egg: createEgg(item.egg),
+          pet: undefined,
+          pets: ownedPets
+        };
+      }
+
+      historyItems.push({
+        id: `${timestamp}${Math.random()}`,
+        amount: -item.totalCost,
+        reason: `🛒 Shop: ${item.itemLabels.join(', ')} (-${item.totalCost}đ)`,
+        timestamp
+      });
+
+      return {
+        ...updatedStudent,
+        points: updatedStudent.points - item.totalCost,
+        history: [...historyItems, ...updatedStudent.history].slice(0, 50)
+      };
+    });
+
+    setStudents(updatedStudents);
+    if (editingStudent) {
+      const updatedEditingStudent = updatedStudents.find(student => student.id === editingStudent.id);
+      if (updatedEditingStudent) setEditingStudent(updatedEditingStudent);
+    }
+    setShowShopModal(false);
+    setShopReview(null);
+    setShopSelections({});
+    new Audio(posSoundUrl).play().catch(() => {});
+    showPokemonReaction(
+      [{ type: 'bond', message: `${purchasableItems.length} học sinh đã mua đồ trong Shop` }],
+      'Shop đã chốt đơn'
+    );
   };
 
   const handleSelectActivePet = (studentId: string, chosenPet: PokemonPet) => {
@@ -1646,7 +1857,15 @@ const App: React.FC = () => {
   };
 
   const toggleAttendance = (id: string) => {
-    setStudents(prev => prev.map(s => s.id === id ? { ...s, isAbsent: !s.isAbsent } : s));
+    setStudents(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      const nextAbsent = !s.isAbsent;
+      return {
+        ...s,
+        isAbsent: nextAbsent,
+        attendanceStatus: nextAbsent ? 'absent' : 'present'
+      };
+    }));
   };
 
   const handleToggleSelectAll = () => {
@@ -1681,7 +1900,19 @@ const App: React.FC = () => {
       alert("Không có học sinh trong lớp hiện tại để check đi học.");
       return;
     }
+    const defaultStatuses: Record<string, AttendanceStatus> = {};
+    currentClassStudents.forEach(student => {
+      defaultStatuses[student.id] = student.attendanceStatus || (student.isAbsent ? 'absent' : 'present');
+    });
+    setAttendanceStatuses(defaultStatuses);
     setShowAttendanceModal(true);
+  };
+
+  const setAttendanceStatus = (studentId: string, status: AttendanceStatus) => {
+    setAttendanceStatuses(prev => ({
+      ...prev,
+      [studentId]: status
+    }));
   };
 
   const toggleHomeworkStatus = (studentId: string) => {
@@ -1775,6 +2006,11 @@ const App: React.FC = () => {
         ...result.student,
         points: rewardedStudent.points
       };
+      const eggResult = advanceEggForStudent(resultStudent, 8);
+      resultStudent = eggResult.student;
+      if (eggResult.hatchedPet) {
+        uiEvents.push({ type: 'evolution', message: `${student.name}: trứng đã nở` });
+      }
       if (resultStudent.pet) {
         const hpUpdate = applyPetHpDeltaToStudent(resultStudent, 8, 'Homework Done: hồi 8 HP');
         resultStudent = hpUpdate.student;
@@ -1782,13 +2018,8 @@ const App: React.FC = () => {
       }
       uiEvents.push(...result.uiEvents);
 
-      const nextEgg = !resultStudent.pet && resultStudent.egg?.status === 'egg'
-        ? { ...resultStudent.egg, progress: Math.min(10, resultStudent.egg.progress + 1) }
-        : resultStudent.egg;
-
       return {
         ...resultStudent,
-        egg: nextEgg,
         history: [historyItem, ...resultStudent.history].slice(0, 50)
       };
     });
@@ -1807,6 +2038,115 @@ const App: React.FC = () => {
       ...uiEvents.filter(event => ['xp', 'bond', 'hp', 'streak', 'passive', 'level-up', 'evolution', 'mastery'].includes(event.type)).slice(0, 3)
     ];
     showPokemonReaction(summaryEvents, 'Homework Check đã chốt');
+  };
+
+  const handleConfirmAttendanceCheck = () => {
+    const timestamp = Date.now();
+    const lessonKeySuffix = getLocalDateKey();
+    const uiEvents: PokemonUiEvent[] = [];
+    const hatchedNames: string[] = [];
+    let presentCount = 0;
+    let lateCount = 0;
+    let absentCount = 0;
+    let skippedCount = 0;
+    let releaseEventToShow: PokemonReleaseEvent | null = null;
+
+    const updatedStudents = students.map(student => {
+      if (!currentClassStudents.some(classStudent => classStudent.id === student.id)) return student;
+
+      const lessonKey = `${student.className}:${lessonKeySuffix}`;
+      if (student.pokemonProgress?.lastAttendanceLessonKey === lessonKey) {
+        skippedCount += 1;
+        return student;
+      }
+
+      const status = attendanceStatuses[student.id] || 'present';
+      const baseStudent = normalizeStudentPokemonData(student);
+      const currentProgress = baseStudent.pokemonProgress!;
+      const pointDelta = status === 'present' ? 5 : status === 'late' ? -5 : 0;
+      const nextAttendanceStreak = status === 'absent' ? 0 : (currentProgress.attendanceStreak || 0) + 1;
+      const nextProgress = {
+        ...currentProgress,
+        attendanceStreak: nextAttendanceStreak,
+        bestAttendanceStreak: Math.max(currentProgress.bestAttendanceStreak || 0, nextAttendanceStreak),
+        lastAttendanceLessonKey: lessonKey
+      };
+      const label = status === 'present' ? 'Có mặt' : status === 'late' ? 'Muộn' : 'Vắng';
+      const historyItem: HistoryItem = {
+        id: `${timestamp}${Math.random()}`,
+        amount: pointDelta,
+        reason: status === 'present'
+          ? `🧭 Đi học Có mặt (${lessonKeySuffix}) (+5 Hào Quang, Pokémon +5 HP)`
+          : status === 'late'
+            ? `🧭 Đi học Muộn (${lessonKeySuffix}) (-5 Hào Quang, Pokémon -5 HP)`
+            : `🧭 Đi học Vắng (${lessonKeySuffix})`,
+        timestamp
+      };
+
+      if (status === 'present') presentCount += 1;
+      if (status === 'late') lateCount += 1;
+      if (status === 'absent') absentCount += 1;
+
+      let resultStudent: Student = {
+        ...baseStudent,
+        points: baseStudent.points + pointDelta,
+        pokemonProgress: nextProgress,
+        isAbsent: status === 'absent',
+        attendanceStatus: status,
+        history: [historyItem, ...baseStudent.history].slice(0, 50)
+      };
+
+      if (pointDelta > 0) {
+        const eggResult = advanceEggForStudent(resultStudent, pointDelta);
+        resultStudent = eggResult.student;
+        if (eggResult.hatchedPet) {
+          hatchedNames.push(student.name);
+        }
+      }
+
+      if (resultStudent.pet && pointDelta !== 0) {
+        const hpUpdate = applyPetHpDeltaToStudent(
+          resultStudent,
+          pointDelta,
+          `Đi học ${label}: ${pointDelta > 0 ? 'hồi' : 'mất'} ${Math.abs(pointDelta)} HP`
+        );
+        resultStudent = hpUpdate.student;
+        if (hpUpdate.releaseEvent && !releaseEventToShow) releaseEventToShow = hpUpdate.releaseEvent;
+        uiEvents.push({ type: 'hp', message: `${student.name}: Pokémon ${pointDelta > 0 ? '+' : ''}${pointDelta} HP` });
+      }
+
+      if (status !== 'absent') {
+        uiEvents.push({ type: 'streak', message: `${student.name}: streak đi học ${nextAttendanceStreak}` });
+      }
+
+      return resultStudent;
+    });
+
+    setStudents(updatedStudents);
+    if (releaseEventToShow) setPokemonReleaseEvent(releaseEventToShow);
+    if (editingStudent) {
+      const updatedEditingStudent = updatedStudents.find(student => student.id === editingStudent.id);
+      if (updatedEditingStudent) setEditingStudent(updatedEditingStudent);
+    }
+    if (randomStudent) {
+      const updatedRandomStudent = updatedStudents.find(student => student.id === randomStudent.id);
+      if (updatedRandomStudent) setRandomStudent(updatedRandomStudent);
+    }
+    setShowAttendanceModal(false);
+    setAttendanceStatuses({});
+
+    if (hatchedNames.length > 0 && !releaseEventToShow) {
+      setHatchSuccessMessage(`Tin vui chấn động triều đình! Trứng của ${hatchedNames.join(', ')} đã nở sau điểm chuyên cần. 🥚🐣`);
+      setShowHatchModal(true);
+    }
+
+    showPokemonReaction(
+      [
+        { type: 'bond', message: `${presentCount} Có mặt · ${lateCount} Muộn · ${absentCount} Vắng${skippedCount ? ` · ${skippedCount} đã chốt` : ''}` },
+        ...uiEvents.slice(0, 3)
+      ],
+      'Check đi học đã chốt'
+    );
   };
 
   const handleRandom = (forceMode?: 'solo' | 'battle') => {
@@ -2958,121 +3298,56 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* NAVIGATION BAR */}
-      <div className="fixed top-0 left-0 right-0 z-40 h-5 group/nav">
-        <nav className="absolute top-0 left-0 right-0 p-3 sm:p-4 backdrop-blur-xl bg-gradient-to-r from-red-950/95 via-red-900/95 to-amber-950/95 border-b-2 border-amber-400/50 shadow-[0_10px_30px_rgba(0,0,0,0.3)] -translate-y-full group-hover/nav:translate-y-0 focus-within:translate-y-0 transition-transform duration-300 ease-out">
-          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
-          
-          {/* Left: Brand */}
-          <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setCurrentScreen('school')}>
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 p-0.5 shadow-lg group-hover:scale-105 transition-transform flex items-center justify-center">
-              <span className="text-2xl">🏮</span>
-            </div>
-            <div className="text-white">
-              <h1 className="text-lg sm:text-xl font-royal font-black uppercase tracking-tight text-amber-200 drop-shadow-sm">Đại Triều Đình</h1>
-              <p className="text-[10px] text-amber-300/80 font-bold uppercase tracking-widest">Vietnamese Imperial Academy</p>
-            </div>
-          </div>
-
-          {/* CENTER: LARGE ROUNDED NAV BAR - EASY TO TAP & HIGH VISIBILITY */}
-          <div className="flex items-center gap-1.5 sm:gap-2 bg-white/10 backdrop-blur-md p-1.5 rounded-full border border-white/20 shadow-inner">
-            <button 
-              onClick={() => setCurrentScreen('school')} 
-              className={`px-4 sm:px-6 py-2.5 rounded-full text-xs sm:text-sm font-black uppercase tracking-wider flex items-center gap-2 transition-all duration-300 ${
-                currentScreen === 'school' 
-                  ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-red-950 shadow-lg shadow-amber-500/30 scale-105 ring-2 ring-white/50' 
-                  : 'text-amber-100 hover:bg-white/15 hover:text-white'
+      {/* LEFT NAV DOCK */}
+      <div className="fixed left-0 top-1/2 z-50 h-40 w-5 -translate-y-1/2 group/nav">
+        <nav
+          className="absolute left-0 top-1/2 flex -translate-y-1/2 -translate-x-[calc(100%-18px)] flex-col items-center gap-3 rounded-r-[28px] border-2 border-white/90 bg-red-950/80 px-3 py-4 shadow-[0_25px_60px_-10px_rgba(120,20,20,0.3)] backdrop-blur-2xl transition-transform duration-300 ease-out group-hover/nav:translate-x-0 focus-within:translate-x-0"
+          style={{
+            boxShadow: '0 20px 50px -10px rgba(120,20,20,0.28), 0 0 35px rgba(212,175,55,0.22), inset 0 2px 3px 0 rgba(255,255,255,0.35)'
+          }}
+        >
+          {[
+            { id: 'school' as Screen, icon: '🏛️', label: 'Kim Tự Tháp' },
+            { id: 'class' as Screen, icon: '📚', label: 'Lớp Học' },
+            { id: 'settings' as Screen, icon: '⚙️', label: 'Cài Đặt' }
+          ].map(item => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setCurrentScreen(item.id)}
+              title={item.label}
+              className={`grid h-14 w-14 place-items-center rounded-2xl border text-2xl shadow-lg transition-all active:scale-95 ${
+                currentScreen === item.id
+                  ? 'border-amber-200 bg-gradient-to-br from-amber-300 via-amber-400 to-amber-600 text-red-950 ring-4 ring-amber-200/35'
+                  : 'border-white/30 bg-white/12 text-amber-100 hover:scale-110 hover:bg-white/20'
               }`}
             >
-              <span className="text-base sm:text-lg">🏛️</span>
-              <span>Kim Tự Tháp</span>
+              {item.icon}
             </button>
-
-            <button 
-              onClick={() => setCurrentScreen('class')} 
-              className={`px-4 sm:px-6 py-2.5 rounded-full text-xs sm:text-sm font-black uppercase tracking-wider flex items-center gap-2 transition-all duration-300 ${
-                currentScreen === 'class' 
-                  ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-red-950 shadow-lg shadow-amber-500/30 scale-105 ring-2 ring-white/50' 
-                  : 'text-amber-100 hover:bg-white/15 hover:text-white'
-              }`}
-            >
-              <span className="text-base sm:text-lg">📚</span>
-              <span>Lớp Học</span>
-            </button>
-
-            <button 
-              onClick={() => setCurrentScreen('settings')} 
-              className={`px-4 sm:px-6 py-2.5 rounded-full text-xs sm:text-sm font-black uppercase tracking-wider flex items-center gap-2 transition-all duration-300 ${
-                currentScreen === 'settings' 
-                  ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-red-950 shadow-lg shadow-amber-500/30 scale-105 ring-2 ring-white/50' 
-                  : 'text-amber-100 hover:bg-white/15 hover:text-white'
-              }`}
-            >
-              <span className="text-base sm:text-lg">⚙️</span>
-              <span>Cài Đặt</span>
-            </button>
-          </div>
-
-          {/* Right Controls: Class Dropdown & User Status */}
-          <div className="flex items-center gap-2 sm:gap-3">
-            {/* Class Dropdown */}
-            <div className="relative">
-              <select 
-                value={filterClass} 
-                onChange={e => {
-                  setFilterClass(e.target.value);
-                  if (currentScreen === 'school') setCurrentScreen('class');
-                }} 
-                className="bg-black/40 text-amber-200 border border-amber-400/40 px-3 py-2 pr-7 rounded-2xl outline-none font-black text-xs text-center appearance-none hover:bg-black/60 transition-all cursor-pointer shadow-inner"
-              >
-                <option value="Tất cả" className="text-black font-bold">Tất cả học sĩ</option>
-                {classes.filter(c => c !== 'Tất cả').map(c => (
-                  <option key={c} value={c} className="text-black font-bold">{c}</option>
-                ))}
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-amber-300 opacity-80">
-                <span className="text-[10px]">▼</span>
-              </div>
-            </div>
-
-            {/* Sync feedback dot */}
-            {(lastSyncedTime || isSyncing) && (
-              <div className="hidden lg:flex bg-black/40 px-3 py-1.5 rounded-full border border-amber-400/30 items-center" title={lastSyncedTime ? `Cập nhật: ${new Date(lastSyncedTime).toLocaleTimeString()}` : 'Đang kết nối...'}>
-                <div className="text-[9px] font-mono text-amber-300 font-black select-none flex items-center gap-1.5">
-                  {isSyncing ? (
-                    <>
-                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-                      <span>SYNC</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
-                      <span>CLOUD: {new Date(lastSyncedTime!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* User Profile Button */}
-            <button 
-              onClick={() => setShowUserModal(true)} 
-              className="flex items-center gap-2 p-1 pr-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-red-950 font-black rounded-full transition-all border border-amber-200 shadow-md active:scale-95 shrink-0"
-              title="Thành viên triều đình"
-            >
-              <img 
-                src={profile?.photoURL || 'https://api.dicebear.com/7.x/bottts/svg'} 
-                className="w-7 h-7 rounded-full border border-white/80 object-cover" 
-                alt="Avatar"
-                referrerPolicy="no-referrer"
-              />
-              <span className="hidden sm:inline text-xs font-black max-w-[90px] truncate">{profile?.displayName || 'Sỹ Phu'}</span>
-            </button>
-          </div>
-
-          </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => setShowUserModal(true)}
+            title="Thành viên triều đình"
+            className="grid h-14 w-14 place-items-center overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-300 to-amber-600 shadow-lg transition-all hover:scale-110 active:scale-95"
+          >
+            <img
+              src={profile?.photoURL || 'https://api.dicebear.com/7.x/bottts/svg'}
+              className="h-10 w-10 rounded-xl border border-white/80 object-cover"
+              alt="Avatar"
+              referrerPolicy="no-referrer"
+            />
+          </button>
         </nav>
       </div>
+
+      <StatusDock
+        user={user}
+        isSyncing={isSyncing}
+        lastSyncedTime={lastSyncedTime}
+        onBackup={handleBackupToCloud}
+        onRestore={handleRestoreFromCloud}
+      />
 
       {/* MAIN CONTENT */}
       <main className="max-w-7xl mx-auto p-6">
@@ -3117,6 +3392,22 @@ const App: React.FC = () => {
           <div className="animate-in fade-in duration-300">
             <div className="flex flex-wrap gap-4 mb-8 bg-gray-50 p-4 rounded-2xl border items-center">
               <input type="text" placeholder="Tìm kiếm học sĩ..." className="flex-1 p-3 rounded-xl border outline-none focus:ring-2 ring-red-800/20" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+
+              <div className="relative">
+                <select
+                  value={filterClass}
+                  onChange={e => setFilterClass(e.target.value)}
+                  className="bg-white text-red-950 border-2 border-amber-200 px-4 py-3 pr-9 rounded-xl outline-none font-black text-xs appearance-none hover:border-amber-400 transition-all cursor-pointer shadow-sm"
+                >
+                  <option value="Tất cả">Tất cả học sĩ</option>
+                  {classes.filter(c => c !== 'Tất cả').map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-amber-700">
+                  <span className="text-[10px]">▼</span>
+                </div>
+              </div>
               
               <button
                 onClick={openAttendanceCheck}
@@ -3137,7 +3428,6 @@ const App: React.FC = () => {
                 if (!name) return;
                 const gender = confirm("Nhấn OK cho Nam, Cancel cho Nữ") ? Gender.MALE : Gender.FEMALE;
                 const cls = prompt("Lớp:", filterClass !== 'Tất cả' ? filterClass : 'Mới');
-                const randomDexId = LIST_POKEMONS[Math.floor(Math.random() * LIST_POKEMONS.length)].dexId;
                 setStudents(prev => [...prev, { 
                   id: Date.now().toString(), 
                   name, 
@@ -3145,11 +3435,7 @@ const App: React.FC = () => {
                   className: cls || 'Triều Đình', 
                   points: 0, 
                   history: [],
-                  egg: {
-                    progress: 0,
-                    status: 'egg' as const,
-                    assignedDexId: randomDexId
-                  }
+                  egg: createEgg('normal')
                 }]);
               }} className="bg-red-800 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-red-900 transition-all">+ Thêm Học Sĩ</button>
             </div>
@@ -3187,6 +3473,7 @@ const App: React.FC = () => {
               onRandom={handleRandom}
               onLudo={() => openLudoForClass()}
               onLuckyWheel={handleOpenLuckyWheel}
+              onShop={handleOpenShop}
               onGroup={() => setShowGroupModal(true)}
               onTimer={() => setShowTimerModal(true)}
               onSelectAll={handleToggleSelectAll}
@@ -3194,10 +3481,8 @@ const App: React.FC = () => {
               onToggleMultiSelect={() => { setIsMultiSelectMode(!isMultiSelectMode); setSelectedStudentIds([]); }}
               onResetAura={handleResetSelectedAura}
               selectedCount={selectedStudentIds.length}
-              user={user}
               isSyncing={isSyncing}
-              onBackup={handleBackupToCloud}
-              onRestore={handleRestoreFromCloud}
+              lastSyncedTime={lastSyncedTime}
               onOpenFeedback={() => { setFeedbackSource('manual'); setShowSkillModal(true); }}
               onDeleteSelected={handleDeleteStudents}
             />
@@ -3330,30 +3615,30 @@ const App: React.FC = () => {
                   <div className="space-y-10">
                     <div className="text-center py-6 space-y-6 bg-gradient-to-b from-amber-50/30 to-transparent p-8 rounded-[40px] border border-amber-100/50">
                       <div className="relative inline-block">
-                        <div className={`absolute inset-0 bg-amber-400/20 rounded-full blur-2xl transition-all duration-1000 ${editingStudent.egg && editingStudent.egg.progress >= 7 ? 'animate-ping scale-75' : ''}`} />
+                        <div className={`absolute inset-0 bg-amber-400/20 rounded-full blur-2xl transition-all duration-1000 ${editingStudent.egg && editingStudent.egg.progress >= Math.ceil(getEggRequiredProgress(editingStudent.egg) * 0.7) ? 'animate-ping scale-75' : ''}`} />
                         
-                        <div className={`text-9xl select-none inline-block transform transition-transform ${editingStudent.egg && editingStudent.egg.progress >= 7 ? 'animate-bounce cursor-pointer' : 'hover:scale-105 duration-300'}`}>
-                          {editingStudent.egg && editingStudent.egg.progress >= 10 ? '🐣' : editingStudent.egg && editingStudent.egg.progress >= 7 ? '🥚💥' : editingStudent.egg && editingStudent.egg.progress >= 4 ? '🥚⚡' : '🥚'}
+                        <div className={`text-9xl select-none inline-block transform transition-transform ${editingStudent.egg && editingStudent.egg.progress >= Math.ceil(getEggRequiredProgress(editingStudent.egg) * 0.7) ? 'animate-bounce cursor-pointer' : 'hover:scale-105 duration-300'}`}>
+                          {editingStudent.egg && editingStudent.egg.progress >= getEggRequiredProgress(editingStudent.egg) ? '🐣' : editingStudent.egg && editingStudent.egg.progress >= Math.ceil(getEggRequiredProgress(editingStudent.egg) * 0.7) ? '🥚💥' : editingStudent.egg && editingStudent.egg.progress >= Math.ceil(getEggRequiredProgress(editingStudent.egg) * 0.4) ? '🥚⚡' : '🥚'}
                         </div>
                       </div>
                       
                       <div className="max-w-md mx-auto bg-white border border-amber-200/60 p-6 rounded-3xl shadow-sm space-y-4">
                         <div className="flex justify-between items-center text-sm">
                           <span className="font-black text-amber-950">Tiến Trình Ấp Quả Trứng</span>
-                          <span className="font-black text-amber-600 bg-amber-100 px-3 py-1 rounded-full text-xs">{(editingStudent.egg ? editingStudent.egg.progress : 0)}/10đ</span>
+                          <span className="font-black text-amber-600 bg-amber-100 px-3 py-1 rounded-full text-xs">{(editingStudent.egg ? editingStudent.egg.progress : 0)}/{getEggRequiredProgress(editingStudent.egg)}đ</span>
                         </div>
                         <div className="w-full bg-gray-100 h-3.5 rounded-full overflow-hidden shadow-inner border animate-pulse">
                           <div 
                             className="bg-amber-500 h-full rounded-full transition-all duration-1000"
-                            style={{ width: `${Math.min(100, Math.max(0, ((editingStudent.egg ? editingStudent.egg.progress : 0) / 10) * 100))}%` }}
+                            style={{ width: `${Math.min(100, Math.max(0, ((editingStudent.egg ? editingStudent.egg.progress : 0) / getEggRequiredProgress(editingStudent.egg)) * 100))}%` }}
                           />
                         </div>
                         <p className="text-xs text-gray-400 italic font-sans leading-relaxed">
-                          {editingStudent.egg && editingStudent.egg.progress >= 10 
+                          {editingStudent.egg && editingStudent.egg.progress >= getEggRequiredProgress(editingStudent.egg)
                             ? 'Chúc mừng! Có sinh mệnh sắp vươn mình ra khỏi lớp vỏ mỏng manh!'
-                            : editingStudent.egg && editingStudent.egg.progress >= 7
+                            : editingStudent.egg && editingStudent.egg.progress >= Math.ceil(getEggRequiredProgress(editingStudent.egg) * 0.7)
                               ? 'Lớp vỏ trứng nứt sâu rộn ràng! Chỉ 1 vài nét khích lệ hào quang từ giáo sĩ là nở trứng ngay!'
-                              : editingStudent.egg && editingStudent.egg.progress >= 4
+                              : editingStudent.egg && editingStudent.egg.progress >= Math.ceil(getEggRequiredProgress(editingStudent.egg) * 0.4)
                                 ? 'Vỏ trứng bắt đầu xuất hiện rạn xước lấp lánh sinh lực.'
                                 : 'Trứng nguyên sơ đang chờ đợi được nạp năng lượng bằng các phản hồi tích cực.'}
                         </p>
@@ -3361,11 +3646,12 @@ const App: React.FC = () => {
                         <div className="pt-2 flex flex-col gap-3">
                           <button 
                             onClick={() => {
-                              const currentEgg = editingStudent.egg || { progress: 0, status: 'egg' as const, assignedDexId: LIST_POKEMONS[Math.floor(Math.random()*LIST_POKEMONS.length)].dexId };
+                              const currentEgg = editingStudent.egg || createEgg('normal');
+                              const requiredProgress = getEggRequiredProgress(currentEgg);
                               const nextProg = currentEgg.progress + 1;
-                              const isHatching = nextProg >= 10;
+                              const isHatching = nextProg >= requiredProgress;
                               
-                              let updatedEgg = { ...currentEgg, progress: Math.min(10, nextProg) };
+                              let updatedEgg = { ...currentEgg, requiredProgress, progress: Math.min(requiredProgress, nextProg) };
                               let updatedPet = editingStudent.pet;
 
                               let historyItem: HistoryItem = { id: Date.now().toString(), amount: 1, reason: "Ủng hộ Hào Quang ấp trứng", timestamp: Date.now() };
@@ -3393,18 +3679,27 @@ const App: React.FC = () => {
                             🧪 Ủng Hộ +1đ Hào Quang Ấp Trứng
                           </button>
 
-                          <button
-                            onClick={() => handleBuyNewEgg(editingStudent.id)}
-                            className="w-full bg-red-800 hover:bg-red-950 text-white font-bold py-3.5 rounded-2xl shadow-md active:scale-95 transition-all text-xs uppercase"
-                          >
-                            🥚 Thỉnh Trứng Pokémon Mới (10đ)
-                          </button>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <button
+                              onClick={() => handleBuyNewEgg(editingStudent.id, 'normal')}
+                              className="w-full bg-red-800 hover:bg-red-950 text-white font-bold py-3.5 rounded-2xl shadow-md active:scale-95 transition-all text-xs uppercase"
+                            >
+                              🥚 Trứng thường (10đ)
+                            </button>
+                            <button
+                              onClick={() => handleBuyNewEgg(editingStudent.id, 'special')}
+                              className="w-full bg-purple-700 hover:bg-purple-900 text-white font-bold py-3.5 rounded-2xl shadow-md active:scale-95 transition-all text-xs uppercase"
+                            >
+                              ✨ Trứng đặc biệt (20đ)
+                            </button>
+                          </div>
 
-                          {editingStudent.egg && editingStudent.egg.progress >= 10 && (
+                          {editingStudent.egg && editingStudent.egg.progress >= getEggRequiredProgress(editingStudent.egg) && (
                              <button 
                                onClick={() => {
                                  const currentEgg = editingStudent.egg!;
-                                 const updatedEgg = { ...currentEgg, status: 'hatched' as const, progress: 10 };
+                                 const requiredProgress = getEggRequiredProgress(currentEgg);
+                                 const updatedEgg = { ...currentEgg, status: 'hatched' as const, requiredProgress, progress: requiredProgress };
                                  const updatedPet = createPokemonPetFromDexId(currentEgg.assignedDexId);
                                  
                                  const currentMerged: Student = {
@@ -3564,6 +3859,33 @@ const App: React.FC = () => {
                           </p>
                         </div>
 
+                        <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 via-white to-amber-50 p-4 font-sans shadow-sm">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <p className="text-[9px] uppercase font-black text-indigo-500">Passive & Quà tự động</p>
+                              {(() => {
+                                const passive = getPassiveDefinition(editingStudent.pet.passiveId);
+                                return passive ? (
+                                  <div className="mt-2">
+                                    <p className="text-sm font-black text-indigo-950">
+                                      {getPassiveIcon(passive.id)} {passive.name}
+                                    </p>
+                                    <p className="mt-1 text-xs font-bold leading-relaxed text-indigo-900/70">{passive.description}</p>
+                                  </div>
+                                ) : (
+                                  <p className="mt-2 text-xs font-bold text-gray-400">Pokémon này chưa có passive.</p>
+                                );
+                              })()}
+                            </div>
+                            <div className="rounded-2xl border border-white bg-white/80 p-3 text-[10px] font-black text-amber-950 shadow-inner sm:w-72">
+                              <p>Lv.5 / Lv.12 / Lv.20 / Lv.30: kiểm tra tiến hóa theo loài.</p>
+                              <p className="mt-1">Mỗi lần lên level: Bond +1 và thông báo Level Up ở giữa màn hình.</p>
+                              <p className="mt-1">Charge 5/5: câu trả lời Solo tích cực kế tiếp được tăng XP.</p>
+                              <p className="mt-1">Sau Lv.30: XP chuyển thành Mastery XP để nhận sao Mastery.</p>
+                            </div>
+                          </div>
+                        </div>
+
                         {(editingStudent.pet.level || 1) >= 30 && (
                           <div className="rounded-2xl border border-amber-200 bg-white p-3 font-sans">
                             <p className="text-[9px] uppercase font-black text-gray-400">Mastery</p>
@@ -3576,13 +3898,20 @@ const App: React.FC = () => {
                           </div>
                         )}
 
-                        <div className="flex justify-end pt-1">
+                        <div className="flex flex-wrap justify-end gap-3 pt-1">
                           <button 
-                            onClick={() => handleBuyNewEgg(editingStudent.id)}
+                            onClick={() => handleBuyNewEgg(editingStudent.id, 'normal')}
                             className="bg-red-800 hover:bg-red-950 text-white font-bold text-xs p-3 px-5 rounded-2xl flex items-center gap-2 shadow-md transition-all active:translate-y-px font-sans"
                           >
                             <span>🥚🌟</span>
-                            <span>Thỉnh Trứng Pokémon Mới (10đ)</span>
+                            <span>Trứng thường (10đ)</span>
+                          </button>
+                          <button 
+                            onClick={() => handleBuyNewEgg(editingStudent.id, 'special')}
+                            className="bg-purple-700 hover:bg-purple-900 text-white font-bold text-xs p-3 px-5 rounded-2xl flex items-center gap-2 shadow-md transition-all active:translate-y-px font-sans"
+                          >
+                            <span>✨🥚</span>
+                            <span>Trứng đặc biệt (20đ)</span>
                           </button>
                         </div>
                       </div>
@@ -4070,8 +4399,7 @@ const App: React.FC = () => {
                         const lines = text.split('\n').filter(l => l.trim());
                         const newItems: Student[] = lines.slice(1).map(line => {
                           const [name, cls, pts, gender] = line.split(',').map(v => v.trim());
-                          const randomDexId = LIST_POKEMONS[Math.floor(Math.random() * LIST_POKEMONS.length)].dexId;
-                          return { id: Math.random().toString(36).substr(2, 9), name: name || 'Ẩn danh', className: cls || 'Học sĩ', points: parseInt(pts) || 0, gender: gender === 'Nữ' ? Gender.FEMALE : Gender.MALE, history: [], egg: { progress: 0, status: 'egg' as const, assignedDexId: randomDexId } };
+                          return { id: Math.random().toString(36).substr(2, 9), name: name || 'Ẩn danh', className: cls || 'Học sĩ', points: parseInt(pts) || 0, gender: gender === 'Nữ' ? Gender.FEMALE : Gender.MALE, history: [], egg: createEgg('normal') };
                         });
                         setStudents(prev => [...prev, ...newItems]);
                         alert("Đã tiếp nhận!");
@@ -5123,10 +5451,138 @@ const App: React.FC = () => {
       {showAttendanceModal && (
         <AttendanceCheckModal
           students={currentClassStudents}
+          statuses={attendanceStatuses}
+          lessonDateKey={getLocalDateKey()}
           getRank={getRank}
-          onToggle={toggleAttendance}
+          onSetStatus={setAttendanceStatus}
+          onConfirm={handleConfirmAttendanceCheck}
           onClose={() => setShowAttendanceModal(false)}
         />
+      )}
+
+      {showShopModal && (
+        <div
+          className="fixed inset-0 z-[210] flex items-center justify-center bg-black/75 p-3 backdrop-blur-md animate-in fade-in duration-200"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) {
+              setShowShopModal(false);
+              setShopReview(null);
+            }
+          }}
+        >
+          <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-[34px] border-2 border-white/80 bg-white/90 shadow-[0_30px_90px_rgba(15,118,110,0.28)] backdrop-blur-2xl">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-teal-100 bg-gradient-to-r from-teal-50 via-cyan-50 to-emerald-50 p-5">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.28em] text-teal-600">Class Shop</p>
+                <h2 className="font-royal text-3xl text-teal-950">Shop Linh Thú & Tuyệt Chiêu</h2>
+              </div>
+              <button
+                onClick={() => {
+                  setShowShopModal(false);
+                  setShopReview(null);
+                }}
+                className="grid h-10 w-10 place-items-center rounded-full border border-teal-200 bg-white text-lg font-black text-teal-900 hover:bg-teal-50"
+                aria-label="Đóng Shop"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar">
+              <div
+                className="grid min-w-[980px] gap-2 text-xs"
+                style={{ gridTemplateColumns: `220px 160px 160px repeat(${Math.max(1, petSkills.length)}, minmax(130px, 1fr))` }}
+              >
+                <div className="sticky top-0 z-10 rounded-2xl bg-teal-900 px-3 py-3 font-black uppercase text-white">Học sinh</div>
+                <div className="sticky top-0 z-10 rounded-2xl bg-teal-900 px-3 py-3 text-center font-black uppercase text-white">Trứng thường</div>
+                <div className="sticky top-0 z-10 rounded-2xl bg-teal-900 px-3 py-3 text-center font-black uppercase text-white">Trứng đặc biệt</div>
+                {petSkills.map(skill => (
+                  <div key={skill.id} className="sticky top-0 z-10 rounded-2xl bg-teal-900 px-3 py-3 text-center font-black uppercase text-white" title={`${skill.name}: ${skill.description} · Giá ${skill.cost}đ`}>
+                    <span>{skill.icon}</span> {skill.name}
+                  </div>
+                ))}
+
+                {currentClassStudents.map(student => {
+                  const selection = shopSelections[student.id] || { skills: [] };
+                  const ownedSkillIds = student.pet?.skills || [];
+                  return (
+                    <React.Fragment key={student.id}>
+                      <div className="rounded-2xl border border-teal-100 bg-white p-3">
+                        <p className="font-black text-teal-950">{student.name}</p>
+                        <p className="mt-0.5 text-[10px] font-bold text-teal-700/70">{student.points}đ Hào Quang · {student.pet ? getPokemonDisplayName(student.pet) : 'Đang ấp trứng'}</p>
+                      </div>
+                      {(['normal', 'special'] as const).map(kind => (
+                        <label key={kind} className={`flex cursor-pointer items-center justify-center rounded-2xl border p-3 font-black transition-all ${selection.egg === kind ? 'border-teal-500 bg-teal-50 text-teal-800 ring-2 ring-teal-100' : 'border-teal-100 bg-white text-stone-400 hover:border-teal-300'}`}>
+                          <input
+                            type="checkbox"
+                            checked={selection.egg === kind}
+                            onChange={() => toggleShopEgg(student.id, kind)}
+                            className="mr-2 h-4 w-4 accent-teal-600"
+                          />
+                          {kind === 'special' ? '20đ' : '10đ'}
+                        </label>
+                      ))}
+                      {petSkills.map(skill => {
+                        const disabled = !student.pet || ownedSkillIds.includes(skill.id);
+                        const checked = selection.skills.includes(skill.id);
+                        return (
+                          <label
+                            key={skill.id}
+                            title={`${skill.name}: ${skill.description} · Giá ${skill.cost}đ${disabled ? student.pet ? ' · Đã sở hữu' : ' · Cần có Pokémon active' : ''}`}
+                            className={`flex cursor-pointer items-center justify-center rounded-2xl border p-3 text-center font-black transition-all ${checked ? 'border-indigo-500 bg-indigo-50 text-indigo-800 ring-2 ring-indigo-100' : 'border-teal-100 bg-white text-stone-400 hover:border-indigo-300'} ${disabled ? 'cursor-not-allowed opacity-45' : ''}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={disabled}
+                              onChange={() => toggleShopSkill(student.id, skill.id)}
+                              className="mr-2 h-4 w-4 accent-indigo-600"
+                            />
+                            {skill.cost}đ
+                          </label>
+                        );
+                      })}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-teal-100 bg-white/80 p-5">
+              <p className="text-xs font-bold text-teal-900/70">Trứng thường: 80% thường, 20% đặc biệt. Trứng đặc biệt: 100% đặc biệt/rare/legend.</p>
+              <button
+                onClick={handlePrepareShopPurchase}
+                className="rounded-2xl bg-teal-700 px-8 py-3 text-xs font-black uppercase tracking-wider text-white shadow-lg transition-all hover:bg-teal-900 active:scale-95"
+              >
+                Mua
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {shopReview && (
+        <div className="fixed inset-0 z-[230] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="w-full max-w-2xl rounded-[32px] border-2 border-white/80 bg-white p-6 shadow-[0_30px_90px_rgba(15,118,110,0.32)]">
+            <h3 className="font-royal text-2xl text-teal-950">Xác nhận đơn Shop</h3>
+            <div className="mt-4 max-h-[50vh] space-y-3 overflow-y-auto pr-2 custom-scrollbar">
+              {shopReview.map(item => (
+                <div key={item.studentId} className={`rounded-2xl border p-4 ${item.canAfford ? 'border-teal-100 bg-teal-50/50' : 'border-red-200 bg-red-50'}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-black text-teal-950">{item.studentName}</p>
+                    <p className={`text-sm font-black ${item.canAfford ? 'text-red-700' : 'text-red-900'}`}>-{item.totalCost}đ</p>
+                  </div>
+                  <p className="mt-1 text-xs font-bold text-stone-600">{item.itemLabels.join(', ')}</p>
+                  {!item.canAfford && <p className="mt-1 text-[10px] font-black uppercase text-red-700">Không đủ Hào Quang ({item.pointBalance}đ)</p>}
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button onClick={() => setShopReview(null)} className="rounded-2xl border border-stone-200 bg-white px-6 py-3 text-xs font-black uppercase text-stone-500 hover:bg-stone-50">Quay lại</button>
+              <button onClick={handleConfirmShopPurchase} className="rounded-2xl bg-teal-700 px-6 py-3 text-xs font-black uppercase text-white shadow-lg hover:bg-teal-900">Xác nhận mua</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showHomeworkModal && (

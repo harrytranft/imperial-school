@@ -15,6 +15,8 @@ export interface StudentEgg {
   progress: number; // For egg status: 0-10. At 10, it hatches.
   status: 'egg' | 'hatched';
   assignedDexId: number; // Pre-rolled so they get a specific Pokémon
+  kind?: 'normal' | 'special';
+  requiredProgress?: number;
 }
 
 export interface PokemonPet {
@@ -55,10 +57,15 @@ export interface StudentPokemonProgress {
   bestBattleWinStreak: number;
   homeworkStreak: number;
   bestHomeworkStreak: number;
+  attendanceStreak?: number;
+  bestAttendanceStreak?: number;
   lastHomeworkLessonKey?: string;
+  lastAttendanceLessonKey?: string;
   positiveSoloCount?: number;
   battleWins?: number;
 }
+
+export type AttendanceStatus = 'present' | 'late' | 'absent';
 
 export interface Student {
   id: string;
@@ -68,6 +75,7 @@ export interface Student {
   points: number;
   history: HistoryItem[];
   isAbsent?: boolean;
+  attendanceStatus?: AttendanceStatus;
   customAvatar?: string; // Custom Base64 avatar photo uploaded for student
   egg?: StudentEgg;
   pet?: PokemonPet;
