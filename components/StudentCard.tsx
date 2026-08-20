@@ -2,7 +2,8 @@
 import React from 'react';
 import { Student, RankInfo, Gender } from '../types';
 import { PetSkill } from '../pokemonData';
-import { getPokemonArtworkUrl, getPokemonDisplayName, handlePokemonArtworkError } from '../pokemonProgression';
+import { getPokemonArtworkUrl, getPokemonDisplayName, getPokemonNatureDefinition, handlePokemonArtworkError } from '../pokemonProgression';
+import { getBadgeDefinition, getTrainerLevelPercent, getTrainerTitleDefinition, normalizeTrainerProgress, trainerXpNeededForNextLevel } from '../trainerProgression';
 import { StudentAvatar } from './StudentAvatar';
 
 interface StudentCardProps {
@@ -30,6 +31,19 @@ export const StudentCard: React.FC<StudentCardProps> = ({
   const egg = student.egg;
   const pet = student.pet;
   const progress = student.pokemonProgress;
+  const trainerProgress = normalizeTrainerProgress(student);
+  const trainerTitle = getTrainerTitleDefinition(trainerProgress.titleId);
+  const trainerLevelPct = getTrainerLevelPercent(trainerProgress);
+  const earnedBadgeViews = (student.earnedBadges || [])
+    .map(badge => getBadgeDefinition(badge.badgeId))
+    .filter(Boolean)
+    .slice(0, 4);
+  const petDanger = !!pet && (pet.hp ?? 100) <= 20;
+  const masteryAuraClass = pet && (pet.masteryStars || 0) >= 5
+    ? 'ring-2 ring-fuchsia-400 shadow-[0_0_22px_rgba(217,70,239,0.55)]'
+    : pet && (pet.masteryStars || 0) >= 3
+      ? 'ring-2 ring-amber-300 shadow-[0_0_18px_rgba(251,191,36,0.45)]'
+      : '';
   const eggRequiredProgress = egg?.requiredProgress || 10;
   const streakBadges = [
     { key: 'attendance', label: 'Đi học', value: progress?.attendanceStreak || 0, tone: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
@@ -86,7 +100,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({
                   src={getPokemonArtworkUrl(pet)}
                   onError={event => handlePokemonArtworkError(event, pet)}
                   alt={getPokemonDisplayName(pet)}
-                  className={`w-8 h-8 object-contain cursor-pointer transition-transform group-hover/poke:scale-125 ${pet.isShiny ? 'rounded-full bg-amber-100 ring-2 ring-amber-300' : ''}`}
+                  className={`w-8 h-8 object-contain cursor-pointer transition-transform group-hover/poke:scale-125 ${pet.isShiny ? 'rounded-full bg-amber-100 ring-2 ring-amber-300' : ''} ${petDanger ? 'rounded-full ring-2 ring-red-500 animate-pulse' : masteryAuraClass}`}
                 />
                 {/* Hover preview card showing enlarged Pokemon, name, and skills */}
                 <div className="absolute left-0 bottom-full mb-2 hidden group-hover/poke:flex flex-col bg-amber-950 text-white p-3 rounded-2xl shadow-2xl z-50 w-52 border border-amber-400/40 pointer-events-none animate-in fade-in zoom-in duration-200">
@@ -126,6 +140,14 @@ export const StudentCard: React.FC<StudentCardProps> = ({
             <h3 className="text-xl font-bold text-gray-800 truncate">{student.name}</h3>
           </div>
           <p className="text-[10px] uppercase font-black tracking-widest text-teal-700">Pokemon Trainer</p>
+          <div className="mt-1 flex items-center gap-1.5">
+            <span className="rounded-full bg-red-50 px-2 py-0.5 text-[8px] font-black uppercase tracking-tight text-red-800 border border-red-100">
+              Lv.{trainerProgress.level}
+            </span>
+            <span className="truncate rounded-full bg-amber-50 px-2 py-0.5 text-[8px] font-black text-amber-800 border border-amber-100">
+              {trainerTitle.icon} {trainerTitle.name}
+            </span>
+          </div>
           {streakBadges.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {streakBadges.map(badge => (
@@ -142,7 +164,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({
       <div className="bg-gray-50/70 p-3 rounded-2xl border border-gray-100/50 flex items-center gap-3 mt-1 min-h-[92px]">
         {pet ? (
           <>
-            <div className="w-10 h-10 shrink-0 bg-white rounded-xl border border-amber-200 p-0.5 flex items-center justify-center shadow-sm relative group/pet animate-in fade-in zoom-in duration-300">
+            <div className={`w-10 h-10 shrink-0 bg-white rounded-xl border border-amber-200 p-0.5 flex items-center justify-center shadow-sm relative group/pet animate-in fade-in zoom-in duration-300 ${petDanger ? 'ring-2 ring-red-500 animate-pulse' : masteryAuraClass}`}>
               <img 
                 referrerPolicy="no-referrer"
                 src={getPokemonArtworkUrl(pet)}
@@ -165,7 +187,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({
                 />
               </div>
               <p className="text-[8px] text-gray-400 truncate mt-0.5">
-                {pet.skills.length > 0 ? `${pet.skills.length} tuyệt chiêu` : 'Chưa có kỹ năng bổ trợ'}
+                {getPokemonNatureDefinition(pet.natureId).icon} {getPokemonNatureDefinition(pet.natureId).name} Nature · {pet.skills.length > 0 ? `${pet.skills.length} tuyệt chiêu` : 'Chưa có kỹ năng bổ trợ'}
               </p>
             </div>
           </>
@@ -195,11 +217,20 @@ export const StudentCard: React.FC<StudentCardProps> = ({
         <div className="flex-1">
            <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
               <div 
-                className="bg-red-800 h-full rounded-full transition-all duration-1000" 
-                style={{ width: `${Math.min(100, Math.max(0, (student.points % 50) / 50 * 100))}%` }}
+                className="bg-red-800 h-full rounded-full transition-all duration-1000"
+                style={{ width: `${trainerLevelPct}%` }}
               />
            </div>
-           <p className="text-[8px] uppercase opacity-30 mt-1 font-bold">Level kế tiếp</p>
+           <p className="text-[8px] uppercase opacity-30 mt-1 font-bold">
+             Trainer XP {trainerProgress.xp}/{trainerXpNeededForNextLevel(trainerProgress.level)}
+           </p>
+           {earnedBadgeViews.length > 0 && (
+             <div className="mt-1 flex gap-1">
+               {earnedBadgeViews.map(badge => (
+                 <span key={badge!.id} className="text-[10px]" title={badge!.name}>{badge!.icon}</span>
+               ))}
+             </div>
+           )}
         </div>
         <div className="ml-6 flex flex-col items-end">
            <p className={`text-3xl font-black leading-none ${student.points >= 0 ? 'text-gray-900' : 'text-red-600'}`}>

@@ -15,6 +15,35 @@
   - Persisted `bossStatesByClass` through guest localStorage, Supabase sync, JSON backup/export, and JSON import.
 - Verified production build with `npm run build` after Boss Raid Milestone 1 changes.
 - Verified existing test suite with `npm test` after Boss Raid Milestone 1 changes.
+- Added `bossSystem.test.ts` for Boss core rules:
+  - Encounter gap range, counter readiness, eligible party selection, fair queue cycling, success/failure resolution, contribution sorting, HP defeat clamp, and duplicate round prevention.
+- Added Imperial School 3.0 Milestone C Nature + Trainer Progression:
+  - Added fixed Pokémon Nature per instance with deterministic migration for existing Pokémon.
+  - Added Nature effects for Brave, Loyal, Hardworking, Lucky, Energetic, and Calm while keeping Nature from directly changing Hào Quang.
+  - Added Trainer Level/XP, title definitions, title unlocks, and compact UI on student cards, Random Pokémon status, and trainer profile.
+  - Integrated Trainer XP with Attendance, Homework, Positive Solo, Battle wins, Boss success participation, Boss Top 5 rewards, Pokémon evolution, and badge rewards.
+  - Added Boss Hunter and Boss Slayer title unlock paths.
+- Added Imperial School 3.0 Milestone D Gym Badges:
+  - Added automatic badge definitions and detection for Answer Streak, Homework Streak, Battle Wins, Bond 100, Shiny ownership, egg hatching, Mastery stars, Boss success participation, and Boss Slayer.
+  - Added profile badge display and Trainer XP rewards for newly earned badges.
+- Added Imperial School 3.0 Milestone E Pokémon Expedition:
+  - Added timestamp-based `PokemonExpedition` state with deterministic rewards from seed.
+  - Expedition auto-starts from Attendance for active Pokémon and resolves to ready without polling or server jobs.
+  - Added profile claim UI with small Pokémon XP/Bond rewards and Curious Nature rare-loot modifier.
+- Added Imperial School 3.0 Milestone F Weekly Chest + Egg Fragments:
+  - Added weekly chest progress keyed by week and automatic progress from Attendance, Homework, Positive Solo, Battle, and Boss success.
+  - Added profile chest claim UI with small Pokémon XP/Bond and Normal/Special Egg Fragment rewards.
+  - Added fragment crafting into Egg Inventory without selling Legendary Eggs in Shop.
+- Added Imperial School 3.0 Milestone G Adventure Journal:
+  - Added milestone journal entries for Pokémon hatching, Trainer levels, Gym Badges, and Boss Top 5 rewards.
+  - Added compact profile timeline UI.
+- Added Imperial School 3.0 Milestone H first pass:
+  - Added Support Pokémon slot in owned Pokémon collection.
+  - Support Pokémon do not take HP damage and provide only tiny Pokémon XP/Bond/Charge bonuses.
+  - Added simple cosmetic synergy labels for a few active/support pairs.
+  - Added HP Danger visual state and Mastery aura rings in Pokémon status/card displays.
+- Verified production build with `npm run build` after Imperial School 3.0 Milestones C-H changes.
+- Verified existing test suite with `npm test` after Imperial School 3.0 Milestones C-H changes.
 - Migrated authentication from Firebase Auth to Supabase Auth in `AuthContext.tsx`.
 - Migrated cloud data sync from Firestore to Supabase in `App.tsx`.
 - Added `supabaseClient.ts` for Vite Supabase environment config.

@@ -24,6 +24,85 @@ export interface StudentEgg {
   source?: 'shop' | 'boss' | 'reward' | 'system';
 }
 
+export type PokemonNatureId =
+  | 'brave'
+  | 'curious'
+  | 'loyal'
+  | 'hardworking'
+  | 'lucky'
+  | 'energetic'
+  | 'calm';
+
+export type TrainerTitleId =
+  | 'rookie'
+  | 'homework-master'
+  | 'battle-specialist'
+  | 'pokemon-friend'
+  | 'shiny-hunter'
+  | 'pokemon-breeder'
+  | 'boss-hunter'
+  | 'boss-slayer'
+  | 'pokemon-champion';
+
+export interface TrainerProgress {
+  level: number;
+  xp: number;
+  totalXp: number;
+  titleId?: TrainerTitleId;
+  unlockedTitleIds?: TrainerTitleId[];
+}
+
+export interface EarnedBadge {
+  badgeId: string;
+  earnedAt: number;
+}
+
+export interface PokemonExpedition {
+  expeditionId: string;
+  petInstanceId: string;
+  startedAt: number;
+  resolvesAt: number;
+  status: 'active' | 'ready' | 'claimed';
+  seed: string;
+  reward?: {
+    xp: number;
+    bond: number;
+    eggFragments?: number;
+    rare?: boolean;
+  };
+}
+
+export interface EggFragments {
+  normal?: number;
+  special?: number;
+  legendary?: number;
+}
+
+export interface WeeklyChestProgress {
+  weekKey: string;
+  progress: number;
+  claimed: boolean;
+}
+
+export interface AdventureJournalEntry {
+  id: string;
+  timestamp: number;
+  type:
+    | 'pokemon-hatched'
+    | 'pokemon-evolved'
+    | 'pokemon-lost'
+    | 'bond-max'
+    | 'mastery'
+    | 'shiny-acquired'
+    | 'boss-win'
+    | 'boss-top5'
+    | 'trainer-level'
+    | 'badge-earned';
+  text: string;
+  petInstanceId?: string;
+  metadata?: Record<string, string | number | boolean>;
+}
+
 export interface PokemonPet {
   instanceId?: string;
   dexId: number;
@@ -45,6 +124,7 @@ export interface PokemonPet {
   masteryXp?: number;
   masteryStars?: number;
   passiveId?: string;
+  natureId?: PokemonNatureId;
 }
 
 export interface PokemonReleaseEvent {
@@ -68,6 +148,9 @@ export interface StudentPokemonProgress {
   lastAttendanceLessonKey?: string;
   positiveSoloCount?: number;
   battleWins?: number;
+  hatchedEggs?: number;
+  bossSuccessfulRounds?: number;
+  bossTop5Finishes?: number;
 }
 
 export type AttendanceStatus = 'present' | 'late' | 'absent';
@@ -87,6 +170,13 @@ export interface Student {
   pet?: PokemonPet;
   pets?: PokemonPet[]; // List of all acquired pets
   pokemonProgress?: StudentPokemonProgress;
+  trainerProgress?: TrainerProgress;
+  earnedBadges?: EarnedBadge[];
+  expedition?: PokemonExpedition;
+  eggFragments?: EggFragments;
+  weeklyChest?: WeeklyChestProgress;
+  adventureJournal?: AdventureJournalEntry[];
+  supportPetInstanceId?: string;
   ludoTile?: number; // Position on board (0 to 49)
   ludoSteps?: number; // Total step count
   ludoMonsterStuck?: boolean; // Trapped by monster flag

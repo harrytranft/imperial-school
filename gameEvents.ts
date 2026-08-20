@@ -235,6 +235,13 @@ const shouldRollInstantDrop = (event: GameEvent, trigger: Parameters<typeof reso
     || (event.type === 'BATTLE_RESULT' && event.source === 'battle' && score > 0);
 };
 
+const getSupportPet = (student: Student, activePet: PokemonPet): PokemonPet | undefined => {
+  if (!student.supportPetInstanceId) return undefined;
+  const support = (student.pets || []).find(pet => pet.instanceId === student.supportPetInstanceId);
+  if (!support || support.instanceId === activePet.instanceId) return undefined;
+  return normalizePokemonPet(support);
+};
+
 const applyInstantDrop = (
   student: Student,
   event: GameEvent,
@@ -245,7 +252,7 @@ const applyInstantDrop = (
   if (!student.pet || !shouldRollInstantDrop(event, trigger, score)) return student;
 
   const pet = normalizePokemonPet(student.pet);
-  const baseChancePercent = pet.passiveId === 'mischief' ? 12 : 6;
+  const baseChancePercent = (pet.passiveId === 'mischief' ? 12 : 6) + (pet.natureId === 'lucky' ? 2 : 0);
   const rollSeed = `${event.studentId}:${event.type}:${event.source}:${event.timestamp}:${event.auraDelta || 0}:${event.battleOutcome || ''}:${score}:${pet.instanceId || ''}`;
   const roll = stableHash(`drop-roll:${rollSeed}`) % 100;
   if (roll >= baseChancePercent) return student;
@@ -375,6 +382,26 @@ export const applyGameEventToStudent = (student: Student, event: GameEvent): Gam
   }
 
   const petBeforeEvent = normalizePokemonPet(student.pet);
+  if (petBeforeEvent.natureId === 'brave' && event.type === 'BATTLE_RESULT' && baseXp > 0) {
+    baseXp = Math.ceil(baseXp * 1.1);
+  }
+  if (petBeforeEvent.natureId === 'hardworking' && event.type === 'HOMEWORK_COMPLETE' && baseXp > 0) {
+    baseXp = Math.ceil(baseXp * 1.15);
+  }
+  if (petBeforeEvent.natureId === 'loyal' && baseBond > 0) {
+    baseBond = Math.ceil(baseBond * 1.2);
+  }
+  const supportPet = getSupportPet(student, petBeforeEvent);
+  if (supportPet && baseXp > 0) {
+    const homeworkBoost = supportPet.baseDexId === 7 && event.type === 'HOMEWORK_COMPLETE' ? 0.1 : 0.05;
+    baseXp += Math.max(1, Math.floor(baseXp * homeworkBoost));
+    uiEvents.push({ type: 'passive', message: `${getPokemonDisplayName(supportPet)} Support +XP` });
+  }
+  if (supportPet?.baseDexId === 133 && baseBond > 0) {
+    baseBond += 1;
+    uiEvents.push({ type: 'bond', message: `${getPokemonDisplayName(supportPet)} Support +1 Bond` });
+  }
+
   let chargeReadyBonus = 0;
   let chargeGain = baseCharge;
   if (trigger === 'solo-positive' && (petBeforeEvent.charge || 0) >= 5 && baseXp + bonusXp > 0) {
@@ -384,6 +411,20 @@ export const applyGameEventToStudent = (student: Student, event: GameEvent): Gam
       type: 'charge-ready',
       message: `POWER READY +${chargeReadyBonus} XP`
     });
+  }
+  if (petBeforeEvent.natureId === 'energetic' && trigger === 'solo-positive') {
+    const energeticRollSeed = `${event.studentId}:${event.timestamp}:${event.auraDelta || 0}:${petBeforeEvent.instanceId || ''}`;
+    if (stableHash(`energetic:${energeticRollSeed}`) % 100 < 20) {
+      chargeGain += 1;
+      uiEvents.push({ type: 'charge-ready', message: `Energetic Nature +1 Charge` });
+    }
+  }
+  if (supportPet?.baseDexId === 25 && trigger === 'solo-positive') {
+    const supportRollSeed = `${event.studentId}:${event.timestamp}:${event.auraDelta || 0}:${supportPet.instanceId || ''}`;
+    if (stableHash(`pikachu-support:${supportRollSeed}`) % 100 < 10) {
+      chargeGain += 1;
+      uiEvents.push({ type: 'charge-ready', message: `${getPokemonDisplayName(supportPet)} Support +1 Charge` });
+    }
   }
 
   const passive = resolvePassiveEffect({
@@ -408,7 +449,9 @@ export const applyGameEventToStudent = (student: Student, event: GameEvent): Gam
     baseXp + bonusXp + chargeReadyBonus + (passive.bonusXp || 0),
     baseBond + (passive.bonusBond || 0),
     chargeGain + (passive.bonusCharge || 0),
-    passive.bonusHp || 0,
+    petBeforeEvent.natureId === 'calm' && (passive.bonusHp || 0) > 0
+      ? (passive.bonusHp || 0) + Math.max(1, Math.floor((passive.bonusHp || 0) * 0.1))
+      : passive.bonusHp || 0,
     uiEvents
   );
 

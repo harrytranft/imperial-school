@@ -1,10 +1,29 @@
-import { PokemonPet, Student, StudentPokemonProgress } from './types';
+import { PokemonNatureId, PokemonPet, Student, StudentPokemonProgress } from './types';
 import { LIST_POKEMONS, POKEMON_EVOLUTION_CHAINS } from './pokemonData';
 import { getPassiveIdForBaseDexId } from './pokemonPassives';
 
 const MAX_NORMAL_LEVEL = 30;
 const STAGE_MIN_LEVELS = [1, 5, 12, 20, 30];
 const MASTERY_STAR_THRESHOLDS = [300, 700, 1200, 1800, 2600];
+
+export const POKEMON_NATURE_DEFINITIONS: Array<{
+  id: PokemonNatureId;
+  name: string;
+  icon: string;
+  description: string;
+}> = [
+  { id: 'brave', name: 'Brave', icon: '🛡️', description: 'Battle Pokémon XP +10%' },
+  { id: 'curious', name: 'Curious', icon: '🔎', description: 'Expedition rare loot chance +10%' },
+  { id: 'loyal', name: 'Loyal', icon: '💖', description: 'Bond gain +20%' },
+  { id: 'hardworking', name: 'Hardworking', icon: '📚', description: 'Homework Pokémon XP +15%' },
+  { id: 'lucky', name: 'Lucky', icon: '🍀', description: 'Instant Drop chance +2%' },
+  { id: 'energetic', name: 'Energetic', icon: '⚡', description: 'Positive Solo may gain +1 Charge' },
+  { id: 'calm', name: 'Calm', icon: '🌿', description: 'Positive HP recovery effects are stronger' }
+];
+
+export const getPokemonNatureDefinition = (natureId?: PokemonNatureId) => {
+  return POKEMON_NATURE_DEFINITIONS.find(nature => nature.id === natureId) || POKEMON_NATURE_DEFINITIONS[0];
+};
 
 export const clamp = (value: number, min: number, max: number): number => {
   return Math.min(max, Math.max(min, value));
@@ -21,6 +40,11 @@ export const stableHash = (input: string): number => {
 
 export const createPokemonInstanceId = (): string => {
   return globalThis.crypto?.randomUUID?.() || `pet-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+export const deterministicNatureFromInstanceId = (instanceId?: string, dexId?: number): PokemonNatureId => {
+  const seed = instanceId || `legacy-${dexId || 25}`;
+  return POKEMON_NATURE_DEFINITIONS[stableHash(`nature:${seed}`) % POKEMON_NATURE_DEFINITIONS.length].id;
 };
 
 export const getPokemonDisplayName = (pet?: PokemonPet): string => {
@@ -147,7 +171,10 @@ export const getDefaultPokemonProgress = (): StudentPokemonProgress => ({
   attendanceStreak: 0,
   bestAttendanceStreak: 0,
   positiveSoloCount: 0,
-  battleWins: 0
+  battleWins: 0,
+  hatchedEggs: 0,
+  bossSuccessfulRounds: 0,
+  bossTop5Finishes: 0
 });
 
 export const xpNeededForNextLevel = (level: number): number => {
@@ -325,7 +352,8 @@ export const normalizePokemonPet = (pet: PokemonPet): PokemonPet => {
     isShiny: pet.isShiny ?? false,
     masteryXp,
     masteryStars,
-    passiveId: pet.passiveId || getPassiveIdForBaseDexId(baseDexId)
+    passiveId: pet.passiveId || getPassiveIdForBaseDexId(baseDexId),
+    natureId: pet.natureId || deterministicNatureFromInstanceId(instanceId, baseDexId)
   };
 };
 
@@ -379,9 +407,15 @@ export const normalizeStudentPokemonData = (student: Student): Student => {
 
   return {
     ...student,
+    eggInventory: student.eggInventory || [],
     pet: activePet,
     pets: uniquePets,
-    pokemonProgress: progress
+    pokemonProgress: progress,
+    trainerProgress: student.trainerProgress || { level: 1, xp: 0, totalXp: 0, titleId: 'rookie', unlockedTitleIds: ['rookie'] },
+    earnedBadges: student.earnedBadges || [],
+    eggFragments: student.eggFragments || {},
+    weeklyChest: student.weeklyChest,
+    adventureJournal: student.adventureJournal || []
   };
 };
 

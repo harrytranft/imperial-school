@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { LIST_POKEMONS } from './pokemonData';
 import { Gender, Student } from './types';
 import { applyGameEventToStudent, applyPetHpDeltaToStudent } from './gameEvents';
-import { addPokemonXp, createPokemonPetFromDexId, getPokemonArtworkCandidates, totalXpForLevel } from './pokemonProgression';
+import { addPokemonXp, createPokemonPetFromDexId, deterministicNatureFromInstanceId, getPokemonArtworkCandidates, totalXpForLevel } from './pokemonProgression';
+import { addTrainerXp, applyBadgeRewards, normalizeTrainerProgress } from './trainerProgression';
 
 const makeStudent = (overrides: Partial<Student> = {}): Student => ({
   id: 'student-1',
@@ -112,5 +113,58 @@ describe('game events', () => {
 
     expect(result.releaseEvent).toBeNull();
     expect(result.student.pet?.hp).toBe(100);
+  });
+
+  it('keeps pokemon nature deterministic for legacy instances', () => {
+    const first = deterministicNatureFromInstanceId('legacy-pet-1', 25);
+    const second = deterministicNatureFromInstanceId('legacy-pet-1', 25);
+
+    expect(first).toBe(second);
+  });
+
+  it('applies Brave nature battle XP bonus', () => {
+    const pet = { ...createPokemonPetFromDexId(4, undefined, { isShiny: false }), natureId: 'brave' as const };
+    const student = makeStudent({ pet, pets: [pet] });
+
+    const result = applyGameEventToStudent(student, {
+      type: 'BATTLE_RESULT',
+      source: 'battle',
+      studentId: student.id,
+      battleOutcome: 'win',
+      battleScore: 5,
+      timestamp: 1
+    });
+
+    expect(result.student.pet?.totalXp).toBe((pet.totalXp || 0) + 22);
+  });
+});
+
+describe('trainer progression', () => {
+  it('adds trainer XP independently from aura points', () => {
+    const student = makeStudent({ points: -5 });
+    const result = addTrainerXp(student, 100);
+
+    expect(result.student.points).toBe(-5);
+    expect(result.student.trainerProgress?.level).toBeGreaterThan(1);
+  });
+
+  it('awards badge rewards once', () => {
+    const student = makeStudent({
+      pokemonProgress: {
+        answerStreak: 10,
+        bestAnswerStreak: 10,
+        battleWinStreak: 0,
+        bestBattleWinStreak: 0,
+        homeworkStreak: 0,
+        bestHomeworkStreak: 0
+      }
+    });
+
+    const first = applyBadgeRewards(student, 1);
+    const second = applyBadgeRewards(first.student, 2);
+
+    expect(first.newBadges.some(badge => badge.badgeId === 'blaze')).toBe(true);
+    expect(second.newBadges).toHaveLength(0);
+    expect(normalizeTrainerProgress(first.student).totalXp).toBe(20);
   });
 });

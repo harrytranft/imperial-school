@@ -1,6 +1,6 @@
 import React from 'react';
 import { PokemonPet, StudentPokemonProgress } from '../types';
-import { getPokemonArtworkUrl, getPokemonDisplayName, handlePokemonArtworkError, xpNeededForNextLevel } from '../pokemonProgression';
+import { getPokemonArtworkUrl, getPokemonDisplayName, getPokemonNatureDefinition, handlePokemonArtworkError, xpNeededForNextLevel } from '../pokemonProgression';
 import { PokemonPassiveBadge } from './PokemonPassiveBadge';
 
 interface PokemonMiniStatusProps {
@@ -48,25 +48,30 @@ export const PokemonMiniStatus: React.FC<PokemonMiniStatusProps> = ({
   const neededXp = xpNeededForNextLevel(level);
   const xpPct = Math.min(100, Math.max(0, (xp / neededXp) * 100));
   const charge = Math.min(5, Math.max(0, pet.charge || 0));
+  const nature = getPokemonNatureDefinition(pet.natureId);
+  const danger = hp <= 20;
+  const masteryStars = pet.masteryStars || 0;
 
   return (
     <div className={`rounded-2xl border p-3 shadow-sm ${toneClasses[tone]} ${className}`}>
       <div className="flex items-center gap-3 min-w-0">
         {showImage && (
-          <img
-            referrerPolicy="no-referrer"
-            src={getPokemonArtworkUrl(pet)}
-            onError={event => handlePokemonArtworkError(event, pet)}
-            className={`h-14 w-14 shrink-0 object-contain drop-shadow ${pet.isShiny ? 'rounded-2xl bg-amber-100 ring-2 ring-amber-300' : ''}`}
-            alt={getPokemonDisplayName(pet)}
-          />
+          <div className={`relative shrink-0 rounded-2xl ${danger ? 'ring-2 ring-red-500 animate-pulse' : masteryStars >= 5 ? 'ring-2 ring-fuchsia-400 shadow-[0_0_18px_rgba(217,70,239,0.55)]' : masteryStars >= 3 ? 'ring-2 ring-amber-300 shadow-[0_0_14px_rgba(251,191,36,0.45)]' : ''}`}>
+            <img
+              referrerPolicy="no-referrer"
+              src={getPokemonArtworkUrl(pet)}
+              onError={event => handlePokemonArtworkError(event, pet)}
+              className={`h-14 w-14 object-contain drop-shadow ${pet.isShiny ? 'rounded-2xl bg-amber-100 ring-2 ring-amber-300' : ''}`}
+              alt={getPokemonDisplayName(pet)}
+            />
+          </div>
         )}
 
         <div className="min-w-0 flex-1 text-left">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <p className="truncate text-xs font-black">{pet.isShiny ? '✨ ' : ''}{getPokemonDisplayName(pet)}</p>
-              <p className="truncate text-[9px] font-bold opacity-60">{pet.speciesName || pet.name} · Lv.{level}</p>
+              <p className="truncate text-[9px] font-bold opacity-60">{nature.icon} {nature.name} · {pet.speciesName || pet.name} · Lv.{level}</p>
             </div>
             <PokemonPassiveBadge passiveId={pet.passiveId} compact className="shrink-0" />
           </div>

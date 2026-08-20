@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ActiveBossRound, BossContribution, BossInstance, ClassBossState, EggKind, Student, Gender, HistoryItem, RankInfo, Skill, PokemonPet, PokemonReleaseEvent, LudoTileSpec, LuckyWheelReward, LuckyWheelRewardType, StudentEgg, AttendanceStatus } from './types';
+import { ActiveBossRound, AdventureJournalEntry, BossContribution, BossInstance, ClassBossState, EggKind, Student, Gender, HistoryItem, RankInfo, Skill, PokemonPet, PokemonReleaseEvent, LudoTileSpec, LuckyWheelReward, LuckyWheelRewardType, StudentEgg, AttendanceStatus } from './types';
 import { 
   STORAGE_KEY, DEFAULT_RANKS_MALE, DEFAULT_RANKS_FEMALE, 
   RANKS_KEY_MALE, RANKS_KEY_FEMALE, DEFAULT_SKILLS, SKILLS_KEY,
@@ -28,9 +28,11 @@ import { fetchUserSettings, upsertUserSettings } from './supabaseData';
 import { applyGameEventToStudent, applyPetHpDeltaToStudent, GameEventSource, PokemonUiEvent } from './gameEvents';
 import {
   createPokemonPetFromDexId,
+  addPokemonXp,
   handlePokemonArtworkError,
   getPokemonArtworkUrl,
   getPokemonDisplayName,
+  getPokemonNatureDefinition,
   getNextMasteryTarget,
   getNextEvolutionPreview,
   isSamePokemonPet,
@@ -40,6 +42,16 @@ import {
   updatePetInCollection,
   xpNeededForNextLevel
 } from './pokemonProgression';
+import {
+  BADGE_DEFINITIONS,
+  addTrainerXp,
+  applyBadgeRewards,
+  getBadgeDefinition,
+  getTrainerLevelPercent,
+  getTrainerTitleDefinition,
+  normalizeTrainerProgress,
+  trainerXpNeededForNextLevel
+} from './trainerProgression';
 import {
   BOSS_PARTY_SIZE,
   createClassBossState,
@@ -52,6 +64,7 @@ import {
   resolveBossSuccess,
   selectBossParty
 } from './bossSystem';
+import { claimReadyExpedition, ensureActiveExpedition, markExpeditionReadyIfDue } from './expeditionSystem';
 
 
 type Screen = 'plaza' | 'class' | 'profile' | 'settings';
@@ -108,6 +121,13 @@ const getLocalDateKey = (date = new Date()) => {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+};
+
+const getLocalWeekKey = (date = new Date()) => {
+  const start = new Date(date.getFullYear(), 0, 1);
+  const dayOfYear = Math.floor((date.getTime() - start.getTime()) / 86400000) + 1;
+  const week = Math.ceil((dayOfYear + start.getDay()) / 7);
+  return `${date.getFullYear()}-W${String(week).padStart(2, '0')}`;
 };
 
 const DEFAULT_WHEEL_SPIN_SOUND_URL = 'https://actions.google.com/sounds/v1/transportation/airport_departure_chime.ogg';
@@ -550,6 +570,152 @@ const App: React.FC = () => {
     }
   };
 
+  const applyTrainerJourneyProgress = (
+    student: Student,
+    xpGain: number,
+    timestamp: number,
+    uiEvents: PokemonUiEvent[],
+    reason?: string
+  ): Student => {
+    let nextStudent: Student = {
+      ...student,
+      trainerProgress: normalizeTrainerProgress(student),
+      earnedBadges: student.earnedBadges || []
+    };
+
+    if (xpGain > 0) {
+      const xpResult = addTrainerXp(nextStudent, xpGain);
+      nextStudent = xpResult.student;
+      uiEvents.push({
+        type: 'streak',
+        message: `${student.name}: Trainer +${xpGain} XP${reason ? ` (${reason})` : ''}`
+      });
+      if (xpResult.levelUps > 0) {
+        uiEvents.push({
+          type: 'level-up',
+          message: `${student.name}: Trainer Lv.${nextStudent.trainerProgress?.level}`
+        });
+        nextStudent = appendAdventureJournal(nextStudent, {
+          type: 'trainer-level',
+          text: `${student.name} reached Trainer Lv.${nextStudent.trainerProgress?.level}.`
+        }, timestamp);
+      }
+    }
+
+    const badgeResult = applyBadgeRewards(nextStudent, timestamp);
+    nextStudent = badgeResult.student;
+    badgeResult.newBadges.forEach(badge => {
+      const definition = getBadgeDefinition(badge.badgeId);
+      uiEvents.push({
+        type: 'mastery',
+        message: `${student.name}: ${definition?.icon || '🏅'} ${definition?.name || 'Badge'}`
+      });
+      nextStudent = appendAdventureJournal(nextStudent, {
+        type: 'badge-earned',
+        text: `${student.name} earned ${definition?.name || 'a Gym Badge'}.`
+      }, badge.earnedAt);
+    });
+    if (badgeResult.trainerLevelUps > 0) {
+      uiEvents.push({
+        type: 'level-up',
+        message: `${student.name}: Trainer Lv.${nextStudent.trainerProgress?.level}`
+      });
+    }
+
+    return {
+      ...nextStudent,
+      trainerProgress: normalizeTrainerProgress(nextStudent)
+    };
+  };
+
+  const appendAdventureJournal = (
+    student: Student,
+    entry: Omit<AdventureJournalEntry, 'id' | 'timestamp'>,
+    timestamp = Date.now()
+  ): Student => ({
+    ...student,
+    adventureJournal: [
+      {
+        id: `${timestamp}${Math.random()}`,
+        timestamp,
+        ...entry
+      },
+      ...(student.adventureJournal || [])
+    ].slice(0, 80)
+  });
+
+  const addWeeklyChestProgress = (student: Student, amount: number): Student => {
+    if (amount <= 0) return student;
+    const weekKey = getLocalWeekKey();
+    const current = student.weeklyChest?.weekKey === weekKey
+      ? student.weeklyChest
+      : { weekKey, progress: 0, claimed: false };
+    if (current.claimed) return { ...student, weeklyChest: current };
+    return {
+      ...student,
+      weeklyChest: {
+        ...current,
+        progress: Math.min(100, current.progress + amount)
+      }
+    };
+  };
+
+  const claimWeeklyChest = (student: Student): { student: Student; message: string } => {
+    const current = student.weeklyChest;
+    if (!current || current.progress < 100 || current.claimed) {
+      return { student, message: 'Weekly Chest chưa sẵn sàng.' };
+    }
+
+    let nextStudent = normalizeStudentPokemonData(student);
+    if (nextStudent.pet) {
+      const xpResult = addPokemonXp(nextStudent.pet, 25);
+      const nextPet = {
+        ...xpResult.pet,
+        bond: Math.min(100, (xpResult.pet.bond || 0) + 4)
+      };
+      nextStudent = {
+        ...nextStudent,
+        pet: nextPet,
+        pets: updatePetInCollection(nextStudent, nextPet)
+      };
+    }
+
+    nextStudent = {
+      ...nextStudent,
+      weeklyChest: {
+        ...current,
+        claimed: true
+      },
+      eggFragments: {
+        ...(nextStudent.eggFragments || {}),
+        normal: (nextStudent.eggFragments?.normal || 0) + 5,
+        special: (nextStudent.eggFragments?.special || 0) + 2
+      }
+    };
+
+    return {
+      student: nextStudent,
+      message: `${student.name} mở Weekly Chest: Pokémon +25 XP, +4 Bond, +5 Normal Fragment, +2 Special Fragment`
+    };
+  };
+
+  const craftEggFromFragments = (student: Student, kind: Exclude<EggKind, 'legendary'>): { student: Student; message: string } => {
+    const current = student.eggFragments?.[kind] || 0;
+    if (current < 10) return { student, message: `Cần 10 ${getEggLabel(kind)} fragments để craft.` };
+    const nextStudent: Student = {
+      ...student,
+      eggFragments: {
+        ...(student.eggFragments || {}),
+        [kind]: current - 10
+      },
+      eggInventory: [createEgg(kind, 'reward'), ...(student.eggInventory || [])]
+    };
+    return {
+      student: nextStudent,
+      message: `${student.name} craft thành công ${getEggLabel(kind)} từ fragments.`
+    };
+  };
+
   // Sync state FROM Supabase on login (high priority)
   useEffect(() => {
     if (authLoading) return;
@@ -918,6 +1084,17 @@ const App: React.FC = () => {
     localStorage.setItem(LUCKY_WHEEL_REWARDS_KEY, JSON.stringify(luckyWheelRewards));
   }, [luckyWheelRewards]);
 
+  useEffect(() => {
+    const timestamp = Date.now();
+    let changed = false;
+    const updatedStudents = students.map(student => {
+      const nextStudent = markExpeditionReadyIfDue(student, timestamp);
+      if (nextStudent !== student) changed = true;
+      return nextStudent;
+    });
+    if (changed) setStudents(updatedStudents);
+  }, [students]);
+
   // Ranking Utility
   const getRank = (points: number, gender: Gender): RankInfo => {
     const list = gender === Gender.MALE ? ranksMale : ranksFemale;
@@ -1205,8 +1382,17 @@ const App: React.FC = () => {
         currentStudent = {
           ...currentStudent,
           pet: hatchedPet,
-          pets: [hatchedPet, ...(currentStudent.pets || []).filter(p => !isSamePokemon(p, hatchedPet))]
+          pets: [hatchedPet, ...(currentStudent.pets || []).filter(p => !isSamePokemon(p, hatchedPet))],
+          pokemonProgress: {
+            ...currentStudent.pokemonProgress!,
+            hatchedEggs: (currentStudent.pokemonProgress?.hatchedEggs || 0) + 1
+          }
         };
+        currentStudent = appendAdventureJournal(currentStudent, {
+          type: 'pokemon-hatched',
+          text: `${getPokemonDisplayName(hatchedPet)} hatched for ${student.name}.`,
+          petInstanceId: hatchedPet.instanceId
+        });
       }
     }
 
@@ -1363,6 +1549,18 @@ const App: React.FC = () => {
           progressionResult.uiEvents
             .filter(event => event.type === 'evolution')
             .forEach(event => evolvedMessages.push(`Pokémon của ${s.name}: ${event.message}!`));
+          const trainerXpGain = (amount > 0 ? 5 : 0)
+            + (progressionResult.uiEvents.some(event => event.type === 'evolution') ? 15 : 0);
+          currentStudent = applyTrainerJourneyProgress(
+            currentStudent,
+            trainerXpGain,
+            Date.now(),
+            progressionEvents,
+            amount > 0 ? 'Positive Solo' : undefined
+          );
+          if (amount > 0) {
+            currentStudent = addWeeklyChestProgress(currentStudent, 3);
+          }
         }
 
         return {
@@ -1608,6 +1806,127 @@ const App: React.FC = () => {
     );
   };
 
+  const renderExpeditionPanel = (student: Student) => {
+    const expedition = student.expedition;
+    const now = Date.now();
+    const readyStudent = markExpeditionReadyIfDue(student, now);
+    const readyExpedition = readyStudent.expedition;
+    const isReady = readyExpedition?.status === 'ready';
+    const remainingMs = readyExpedition && readyExpedition.status === 'active'
+      ? Math.max(0, readyExpedition.resolvesAt - now)
+      : 0;
+    const remainingHours = Math.ceil(remainingMs / (60 * 60 * 1000));
+
+    return (
+      <div className="rounded-[32px] border border-emerald-200 bg-emerald-50/70 p-5 text-left shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h4 className="font-royal text-xl text-emerald-950">🧭 Pokémon Expedition</h4>
+            <p className="mt-1 text-xs font-bold text-emerald-900/70">
+              {!student.pet
+                ? 'Cần active Pokémon để đi expedition.'
+                : !readyExpedition
+                  ? 'Chưa có expedition. Chốt điểm danh buổi mới để tự bắt đầu.'
+                  : isReady
+                    ? 'Pokémon đã trở về và có quà sẵn sàng.'
+                    : `Đang khám phá. Còn khoảng ${remainingHours} giờ.`}
+            </p>
+          </div>
+          {isReady && (
+            <button
+              onClick={() => {
+                const result = claimReadyExpedition(readyStudent);
+                setEditingStudent(result.student);
+                setStudents(prev => prev.map(current => current.id === student.id ? result.student : current));
+                if (result.message) showPokemonReaction([{ type: 'xp', message: result.message }], 'Expedition hoàn tất');
+              }}
+              className="rounded-2xl bg-emerald-700 px-4 py-2 text-[10px] font-black uppercase tracking-wider text-white shadow-md hover:bg-emerald-800"
+            >
+              Nhận quà
+            </button>
+          )}
+        </div>
+        {readyExpedition?.reward && (
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[10px] font-black text-emerald-900">
+            <span className="rounded-2xl bg-white p-2">XP +{readyExpedition.reward.xp}</span>
+            <span className="rounded-2xl bg-white p-2">Bond +{readyExpedition.reward.bond}</span>
+            <span className="rounded-2xl bg-white p-2">{readyExpedition.reward.rare ? 'Rare Loot' : 'Loot'}</span>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderWeeklyChestPanel = (student: Student) => {
+    const weekKey = getLocalWeekKey();
+    const chest = student.weeklyChest?.weekKey === weekKey
+      ? student.weeklyChest
+      : { weekKey, progress: 0, claimed: false };
+    const fragments = student.eggFragments || {};
+
+    return (
+      <div className="rounded-[32px] border border-sky-200 bg-sky-50/70 p-5 text-left shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h4 className="font-royal text-xl text-sky-950">🎁 Weekly Chest</h4>
+            <p className="mt-1 text-xs font-bold text-sky-900/70">
+              Tuần {chest.weekKey} · {chest.claimed ? 'Đã nhận' : chest.progress >= 100 ? 'Sẵn sàng mở' : `${chest.progress}/100`}
+            </p>
+          </div>
+          <button
+            disabled={chest.progress < 100 || chest.claimed}
+            onClick={() => {
+              const result = claimWeeklyChest({ ...student, weeklyChest: chest });
+              setEditingStudent(result.student);
+              setStudents(prev => prev.map(current => current.id === student.id ? result.student : current));
+              showPokemonReaction([{ type: 'random-drop', message: result.message }], 'Weekly Chest');
+            }}
+            className="rounded-2xl bg-sky-700 px-4 py-2 text-[10px] font-black uppercase tracking-wider text-white shadow-md hover:bg-sky-800 disabled:bg-stone-200 disabled:text-stone-500"
+          >
+            Mở rương
+          </button>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+          <div className="h-full rounded-full bg-sky-600" style={{ width: `${Math.min(100, chest.progress)}%` }} />
+        </div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          {(['normal', 'special'] as const).map(kind => (
+            <div key={kind} className="flex items-center justify-between rounded-2xl bg-white p-3 text-xs font-black text-sky-950">
+              <span>{getEggLabel(kind)} Fragment: {fragments[kind] || 0}/10</span>
+              <button
+                disabled={(fragments[kind] || 0) < 10}
+                onClick={() => {
+                  const result = craftEggFromFragments(student, kind);
+                  setEditingStudent(result.student);
+                  setStudents(prev => prev.map(current => current.id === student.id ? result.student : current));
+                  showPokemonReaction([{ type: 'random-drop', message: result.message }], 'Craft Egg');
+                }}
+                className="rounded-xl bg-amber-600 px-3 py-1.5 text-[9px] font-black uppercase text-white disabled:bg-stone-200 disabled:text-stone-500"
+              >
+                Craft
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const getSupportPetForStudent = (student: Student): PokemonPet | undefined => {
+    return (student.pets || []).find(pet => pet.instanceId === student.supportPetInstanceId);
+  };
+
+  const getSynergyLabel = (student: Student): string | null => {
+    const activeBase = student.pet?.baseDexId || student.pet?.dexId;
+    const support = getSupportPetForStudent(student);
+    const supportBase = support?.baseDexId || support?.dexId;
+    const pair = new Set([activeBase, supportBase]);
+    if (pair.has(4) && pair.has(7)) return '🔥💧 Kanto Partners';
+    if (pair.has(25) && pair.has(133)) return '⚡🌟 Best Friends';
+    if (pair.has(1) && pair.has(4)) return '🌱🔥 Starter Spark';
+    return null;
+  };
+
   const handleOpenShop = () => {
     if (currentClassStudents.length === 0) {
       alert('Chưa có trainer trong lớp hiện tại để mở Shop.');
@@ -1787,6 +2106,19 @@ const App: React.FC = () => {
     setStudents(prev => prev.map(x => x.id === studentId ? updatedS : x));
     setEditingStudent(updatedS);
     alert(`Pokémon ${getPokemonDisplayName(nextPet)} đã trở lại đồng hành cùng trainer!`);
+  };
+
+  const handleSelectSupportPet = (studentId: string, supportPet?: PokemonPet) => {
+    const updatedStudents = students.map(student => {
+      if (student.id !== studentId) return student;
+      const updatedStudent = {
+        ...student,
+        supportPetInstanceId: supportPet?.instanceId
+      };
+      if (editingStudent?.id === studentId) setEditingStudent(updatedStudent);
+      return updatedStudent;
+    });
+    setStudents(updatedStudents);
   };
 
   const handleUsePetSkill = (studentId: string, skillId: string, skillName: string) => {
@@ -2345,6 +2677,8 @@ const App: React.FC = () => {
         uiEvents.push({ type: 'hp', message: `${student.name}: Pokémon +8 HP` });
       }
       uiEvents.push(...result.uiEvents);
+      resultStudent = applyTrainerJourneyProgress(resultStudent, 10, timestamp, uiEvents, 'Homework Done');
+      resultStudent = addWeeklyChestProgress(resultStudent, 15);
 
       return {
         ...resultStudent,
@@ -2445,6 +2779,15 @@ const App: React.FC = () => {
 
       if (status !== 'absent') {
         uiEvents.push({ type: 'streak', message: `${student.name}: streak đi học ${nextAttendanceStreak}` });
+      }
+
+      if (status === 'present') {
+        resultStudent = applyTrainerJourneyProgress(resultStudent, 5, timestamp, uiEvents, 'Attendance');
+        resultStudent = addWeeklyChestProgress(resultStudent, 10);
+      }
+
+      if (status !== 'absent') {
+        resultStudent = ensureActiveExpedition(resultStudent, timestamp);
       }
 
       return resultStudent;
@@ -2635,6 +2978,7 @@ const App: React.FC = () => {
       : resolveBossFailure(state, partyIds, activeBossRound.roundId, timestamp);
     const topRewardIds = resolution.bossDefeated ? new Set(resolution.topContributors.map(contribution => contribution.studentId)) : new Set<string>();
     const releaseEvents: PokemonReleaseEvent[] = [];
+    const journeyEvents: PokemonUiEvent[] = [];
 
     const updatedStudents = students.map(student => {
       let nextStudent = normalizeStudentPokemonData(student);
@@ -2646,6 +2990,15 @@ const App: React.FC = () => {
           `👹 Boss Raid thành công: +5 Hào Quang`,
           timestamp
         );
+        nextStudent = {
+          ...nextStudent,
+          pokemonProgress: {
+            ...nextStudent.pokemonProgress!,
+            bossSuccessfulRounds: (nextStudent.pokemonProgress?.bossSuccessfulRounds || 0) + 1
+          }
+        };
+        nextStudent = applyTrainerJourneyProgress(nextStudent, 10, timestamp, journeyEvents, 'Boss Success');
+        nextStudent = addWeeklyChestProgress(nextStudent, 5);
       }
 
       if (result === 'failure' && partyIds.includes(student.id)) {
@@ -2668,6 +3021,13 @@ const App: React.FC = () => {
       }
 
       if (topRewardIds.has(student.id)) {
+        nextStudent = {
+          ...nextStudent,
+          pokemonProgress: {
+            ...nextStudent.pokemonProgress!,
+            bossTop5Finishes: (nextStudent.pokemonProgress?.bossTop5Finishes || 0) + 1
+          }
+        };
         nextStudent = applyAuraRewardToStudent(
           nextStudent,
           5,
@@ -2678,6 +3038,11 @@ const App: React.FC = () => {
           ...nextStudent,
           eggInventory: [createEgg('legendary', 'boss'), ...(nextStudent.eggInventory || [])]
         };
+        nextStudent = applyTrainerJourneyProgress(nextStudent, 25, timestamp, journeyEvents, 'Boss Top 5');
+        nextStudent = appendAdventureJournal(nextStudent, {
+          type: 'boss-top5',
+          text: `${nextStudent.name} finished Top 5 against ${state.boss.name} and received a Legendary Egg.`
+        }, timestamp);
       }
 
       return nextStudent;
@@ -2707,7 +3072,7 @@ const App: React.FC = () => {
     const eventMessage = result === 'success'
       ? `Perfect Team Attack: ${state.boss.name} -${resolution.damageDealt} HP`
       : `${state.boss.name} phản công: Pokémon -${state.boss.failDamage} HP`;
-    showPokemonReaction([{ type: result === 'success' ? 'hp' : 'random-drop', message: eventMessage }], result === 'success' ? 'Boss Raid thành công' : 'Boss Raid thất bại');
+    showPokemonReaction([{ type: result === 'success' ? 'hp' : 'random-drop', message: eventMessage }, ...journeyEvents.slice(0, 3)], result === 'success' ? 'Boss Raid thành công' : 'Boss Raid thất bại');
     new Audio(result === 'success' ? posSoundUrl : negSoundUrl).play().catch(() => {});
   };
 
@@ -3056,12 +3421,23 @@ const App: React.FC = () => {
           .map(event => `${student.name}: ${event.message}`)
       ];
 
+      const trainerXpGain = (outcome === 'win' ? 10 : 0)
+        + (progressionResult.uiEvents.some(event => event.type === 'evolution') ? 15 : 0);
+      const journeyStudent = applyTrainerJourneyProgress(
+        progressionResult.student,
+        trainerXpGain,
+        Date.now(),
+        battleUiEvents,
+        outcome === 'win' ? 'Battle Win' : undefined
+      );
+      const chestStudent = addWeeklyChestProgress(journeyStudent, 3 + (outcome === 'win' ? 5 : 0));
+
       return {
-        ...progressionResult.student,
+        ...chestStudent,
         points: newPts,
         history: [
           { id: Date.now().toString() + Math.random(), amount: pointGain, reason: historyReason, timestamp: Date.now() },
-          ...progressionResult.student.history
+          ...chestStudent.history
         ].slice(0, 50)
       };
     };
@@ -4179,6 +4555,95 @@ const App: React.FC = () => {
 
             {profileTab === 'info' ? (
               <div className="space-y-8 animate-in fade-in duration-300">
+                {(() => {
+                  const trainerProgress = normalizeTrainerProgress(editingStudent);
+                  const trainerTitle = getTrainerTitleDefinition(trainerProgress.titleId);
+                  const trainerXpPct = getTrainerLevelPercent(trainerProgress);
+                  const earnedBadgeViews = (editingStudent.earnedBadges || [])
+                    .map(badge => ({ badge, definition: getBadgeDefinition(badge.badgeId) }))
+                    .filter(item => item.definition);
+                  return (
+                    <div className="rounded-[32px] border border-red-100 bg-gradient-to-br from-red-50 to-amber-50 p-5 shadow-sm">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-red-700">Trainer Journey</p>
+                          <h3 className="mt-1 text-2xl font-royal text-red-950">
+                            Lv.{trainerProgress.level} · {trainerTitle.icon} {trainerTitle.name}
+                          </h3>
+                          <p className="mt-1 text-xs font-bold text-stone-500">{trainerTitle.description}</p>
+                        </div>
+                        <div className="min-w-[180px] rounded-2xl bg-white p-3">
+                          <div className="mb-1 flex justify-between text-[10px] font-black text-red-900">
+                            <span>Trainer XP</span>
+                            <span>{trainerProgress.xp}/{trainerXpNeededForNextLevel(trainerProgress.level)}</span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-stone-100">
+                            <div className="h-full rounded-full bg-red-700" style={{ width: `${trainerXpPct}%` }} />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl bg-white p-3">
+                          <p className="mb-2 text-[10px] font-black uppercase tracking-wider text-stone-400">Unlocked Titles</p>
+                          <div className="flex flex-wrap gap-2">
+                            {(trainerProgress.unlockedTitleIds || ['rookie']).map(titleId => {
+                              const title = getTrainerTitleDefinition(titleId);
+                              return (
+                                <button
+                                  key={title.id}
+                                  onClick={() => {
+                                    const updatedStudent = {
+                                      ...editingStudent,
+                                      trainerProgress: {
+                                        ...trainerProgress,
+                                        titleId: title.id
+                                      }
+                                    };
+                                    setEditingStudent(updatedStudent);
+                                    setStudents(prev => prev.map(student => student.id === editingStudent.id ? updatedStudent : student));
+                                  }}
+                                  className={`rounded-full border px-3 py-1 text-[10px] font-black ${trainerProgress.titleId === title.id ? 'border-red-700 bg-red-700 text-white' : 'border-amber-200 bg-amber-50 text-amber-900'}`}
+                                >
+                                  {title.icon} {title.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <div className="rounded-2xl bg-white p-3">
+                          <p className="mb-2 text-[10px] font-black uppercase tracking-wider text-stone-400">Gym Badges</p>
+                          {earnedBadgeViews.length > 0 ? (
+                            <div className="flex flex-wrap gap-2">
+                              {earnedBadgeViews.map(({ badge, definition }) => (
+                                <span key={badge.badgeId} className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[10px] font-black text-amber-900" title={definition!.description}>
+                                  {definition!.icon} {definition!.name}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs font-bold text-stone-400">Chưa có huy hiệu.</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {editingStudent.adventureJournal && editingStudent.adventureJournal.length > 0 && (
+                  <div className="rounded-[32px] border border-stone-200 bg-stone-50 p-5">
+                    <h3 className="font-royal text-xl text-stone-900">📖 Adventure Journal</h3>
+                    <div className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-2 custom-scrollbar">
+                      {editingStudent.adventureJournal.slice(0, 12).map(entry => (
+                        <div key={entry.id} className="rounded-2xl bg-white p-3 text-sm shadow-sm">
+                          <p className="font-bold text-stone-800">{entry.text}</p>
+                          <p className="mt-1 text-[10px] font-bold text-stone-400">{new Date(entry.timestamp).toLocaleDateString()}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex flex-col sm:flex-row gap-8 items-center sm:items-start">
                   <div className="relative shrink-0 flex flex-col items-center gap-2">
                     <StudentAvatar student={editingStudent} className="w-32 h-32 rounded-full border-4 border-[#D4AF37] shadow-lg" />
@@ -4298,12 +4763,17 @@ const App: React.FC = () => {
                               
                               let updatedEgg = { ...currentEgg, requiredProgress, progress: Math.min(requiredProgress, nextProg) };
                               let updatedPet = editingStudent.pet;
+                              let nextPokemonProgress = { ...normalizeStudentPokemonData(editingStudent).pokemonProgress! };
 
                               let historyItem: HistoryItem = { id: Date.now().toString(), amount: 1, reason: "Ủng hộ Hào Quang ấp trứng", timestamp: Date.now() };
 
                               if (isHatching && updatedEgg.status === 'egg') {
                                 updatedEgg.status = 'hatched';
                                 updatedPet = createPokemonPetFromDexId(currentEgg.assignedDexId);
+                                nextPokemonProgress = {
+                                  ...nextPokemonProgress,
+                                  hatchedEggs: (nextPokemonProgress.hatchedEggs || 0) + 1
+                                };
                                 setHatchSuccessMessage(`Tuyệt vời! Quả trứng của trainer ${editingStudent.name} đã chính thức nở ra Pokémon ${getPokemonDisplayName(updatedPet)}! 🎉`);
                                 setShowHatchModal(true);
                               }
@@ -4313,9 +4783,12 @@ const App: React.FC = () => {
                                 points: editingStudent.points + 1,
                                 egg: updatedEgg,
                                 pet: updatedPet,
+                                pokemonProgress: nextPokemonProgress,
                                 pets: updatedPet ? updatePetInCollection(editingStudent, updatedPet) : editingStudent.pets,
                                 history: [historyItem, ...editingStudent.history].slice(0, 50)
                               };
+                              const journeyEvents: PokemonUiEvent[] = [];
+                              currentMerged = applyTrainerJourneyProgress(currentMerged, 0, Date.now(), journeyEvents);
                               setEditingStudent(currentMerged);
                               setStudents(prev => prev.map(s => s.id === editingStudent.id ? currentMerged : s));
                             }}
@@ -4346,13 +4819,20 @@ const App: React.FC = () => {
                                  const requiredProgress = getEggRequiredProgress(currentEgg);
                                  const updatedEgg = { ...currentEgg, status: 'hatched' as const, requiredProgress, progress: requiredProgress };
                                  const updatedPet = createPokemonPetFromDexId(currentEgg.assignedDexId);
+                                 const nextPokemonProgress = {
+                                   ...normalizeStudentPokemonData(editingStudent).pokemonProgress!,
+                                   hatchedEggs: (editingStudent.pokemonProgress?.hatchedEggs || 0) + 1
+                                 };
                                  
-                                 const currentMerged: Student = {
+                                 let currentMerged: Student = {
                                    ...editingStudent,
                                    egg: updatedEgg,
                                    pet: updatedPet,
+                                   pokemonProgress: nextPokemonProgress,
                                    pets: updatePetInCollection(editingStudent, updatedPet)
                                  };
+                                 const journeyEvents: PokemonUiEvent[] = [];
+                                 currentMerged = applyTrainerJourneyProgress(currentMerged, 0, Date.now(), journeyEvents);
 
                                  setEditingStudent(currentMerged);
                                  setStudents(prev => prev.map(s => s.id === editingStudent.id ? currentMerged : s));
@@ -4369,6 +4849,8 @@ const App: React.FC = () => {
                     </div>
 
                     {renderEggInventory(editingStudent)}
+                    {renderExpeditionPanel(editingStudent)}
+                    {renderWeeklyChestPanel(editingStudent)}
 
                     {/* OWNED PORTFOLIO SELECTION IN EGG SCREEN (WHEN WAITING FOR HATCH) */}
                     {editingStudent.pets && editingStudent.pets.length > 0 && (
@@ -4411,6 +4893,8 @@ const App: React.FC = () => {
                   /* PET CORNER DETAILED STORE & CUSTOMIZATION */
                   <div className="space-y-8 animate-in fade-in duration-300">
                     {renderEggInventory(editingStudent)}
+                    {renderExpeditionPanel(editingStudent)}
+                    {renderWeeklyChestPanel(editingStudent)}
 
                     <div className="bg-amber-50/50 rounded-3xl border border-amber-200/50 p-6 flex flex-col md:flex-row gap-6 items-center">
                       <div className="shrink-0 w-44 h-44 bg-white rounded-2xl border-4 border-amber-300 p-4 flex items-center justify-center relative shadow-lg overflow-hidden group">
@@ -4575,10 +5059,16 @@ const App: React.FC = () => {
                             <span>Pokémon Đã Sở Hữu ({editingStudent.pets.length})</span>
                           </h4>
                           <p className="text-xs text-amber-950/60 mt-0.5">Lựa chọn một Pokémon trong bộ sưu tập để đồng hành cùng trainer.</p>
+                          {getSynergyLabel(editingStudent) && (
+                            <p className="mt-2 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-emerald-800">
+                              {getSynergyLabel(editingStudent)}
+                            </p>
+                          )}
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[190px] overflow-y-auto pr-2 custom-scrollbar font-sans">
                           {editingStudent.pets.map(p => {
                             const isActive = isSamePokemon(editingStudent.pet, p);
+                            const isSupport = editingStudent.supportPetInstanceId === p.instanceId;
                             return (
                               <div key={p.instanceId || `${p.dexId}-${p.name}`} className={`p-3 bg-white border rounded-2xl flex items-center justify-between gap-3 shadow-xs transition-all ${isActive ? 'border-amber-400 ring-2 ring-amber-100' : 'border-gray-100'}`}>
                                 <div className="flex items-center gap-2 min-w-0">
@@ -4596,12 +5086,21 @@ const App: React.FC = () => {
                                 {isActive ? (
                                   <span className="text-[9px] bg-amber-500 text-white font-extrabold px-2.5 py-1.5 rounded-full uppercase tracking-tighter shrink-0">ĐANG ĐỒNG HÀNH</span>
                                 ) : (
-                                  <button 
-                                    onClick={() => handleSelectActivePet(editingStudent.id, p)}
-                                    className="bg-gray-100 hover:bg-amber-100 text-amber-950 text-[9px] font-bold px-3 py-1.5 rounded-xl border border-amber-200 uppercase tracking-wider shadow-xs transition-all shrink-0"
-                                  >
-                                    Chọn Đồng Hành ⚔️
-                                  </button>
+                                  <div className="flex shrink-0 flex-col gap-1.5">
+                                    <button 
+                                      onClick={() => handleSelectActivePet(editingStudent.id, p)}
+                                      className="bg-gray-100 hover:bg-amber-100 text-amber-950 text-[9px] font-bold px-3 py-1.5 rounded-xl border border-amber-200 uppercase tracking-wider shadow-xs transition-all"
+                                    >
+                                      Active ⚔️
+                                    </button>
+                                    <button
+                                      disabled={!p.instanceId}
+                                      onClick={() => handleSelectSupportPet(editingStudent.id, isSupport ? undefined : p)}
+                                      className={`text-[9px] font-bold px-3 py-1.5 rounded-xl border uppercase tracking-wider shadow-xs transition-all ${isSupport ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-200'}`}
+                                    >
+                                      {isSupport ? 'Support ✓' : 'Support'}
+                                    </button>
+                                  </div>
                                 )}
                               </div>
                             );
