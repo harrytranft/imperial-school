@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Student, Gender, HistoryItem, RankInfo, Skill, PokemonPet, PokemonReleaseEvent, LudoTileSpec, LuckyWheelReward, LuckyWheelRewardType, StudentEgg, AttendanceStatus } from './types';
+import { ActiveBossRound, BossContribution, BossInstance, ClassBossState, EggKind, Student, Gender, HistoryItem, RankInfo, Skill, PokemonPet, PokemonReleaseEvent, LudoTileSpec, LuckyWheelReward, LuckyWheelRewardType, StudentEgg, AttendanceStatus } from './types';
 import { 
   STORAGE_KEY, DEFAULT_RANKS_MALE, DEFAULT_RANKS_FEMALE, 
   RANKS_KEY_MALE, RANKS_KEY_FEMALE, DEFAULT_SKILLS, SKILLS_KEY,
-  DEFAULT_LUDO_TILES, PET_SKILLS_KEY, DEFAULT_LUCKY_WHEEL_REWARDS,
+  BOSS_STATES_KEY, DEFAULT_LUDO_TILES, PET_SKILLS_KEY, DEFAULT_LUCKY_WHEEL_REWARDS,
   LUCKY_WHEEL_REWARDS_KEY, WHEEL_SPIN_SOUND_KEY, WHEEL_FINISH_SOUND_KEY
 } from './constants';
 import { StudentCard } from './components/StudentCard';
@@ -18,6 +18,8 @@ import { HomeworkStatus } from './components/HomeworkCheckModal';
 import { PokemonMiniStatus } from './components/PokemonMiniStatus';
 import { PokemonPassiveBadge } from './components/PokemonPassiveBadge';
 import { PokemonReactionToast } from './components/PokemonReactionToast';
+import { BossBattlePanel } from './components/BossBattlePanel';
+import { BossDefeatedModal } from './components/BossDefeatedModal';
 import { generateEdict } from './geminiService';
 import { LIST_POKEMONS, LIST_PET_SKILLS as DEFAULT_PET_SKILLS, PetSkill, getRandomPokemon } from './pokemonData';
 import { getPassiveDefinition, getPassiveIcon } from './pokemonPassives';
@@ -38,9 +40,22 @@ import {
   updatePetInCollection,
   xpNeededForNextLevel
 } from './pokemonProgression';
+import {
+  BOSS_PARTY_SIZE,
+  createClassBossState,
+  getBossTopContributors,
+  incrementBossEncounterCounter,
+  isBossEncounterReady,
+  normalizeBossStatesByClass,
+  normalizeClassBossState,
+  resolveBossFailure,
+  resolveBossSuccess,
+  selectBossParty
+} from './bossSystem';
 
 
 type Screen = 'plaza' | 'class' | 'profile' | 'settings';
+type RandomMode = 'solo' | 'battle' | 'boss';
 
 const LUDO_FINISH_TILE = 49;
 
@@ -67,7 +82,7 @@ interface ShopReviewItem {
   studentId: string;
   studentName: string;
   pointBalance: number;
-  egg?: 'normal' | 'special';
+  egg?: Exclude<EggKind, 'legendary'>;
   skillIds: string[];
   itemLabels: string[];
   totalCost: number;
@@ -333,10 +348,10 @@ const App: React.FC = () => {
   const [showHomeworkModal, setShowHomeworkModal] = useState(false);
   const [homeworkStatuses, setHomeworkStatuses] = useState<Record<string, HomeworkStatus>>({});
   const [showShopModal, setShowShopModal] = useState(false);
-  const [shopSelections, setShopSelections] = useState<Record<string, { egg?: 'normal' | 'special'; skills: string[] }>>({});
+  const [shopSelections, setShopSelections] = useState<Record<string, { egg?: Exclude<EggKind, 'legendary'>; skills: string[] }>>({});
   const [shopReview, setShopReview] = useState<ShopReviewItem[] | null>(null);
   const [selectedShopSkill, setSelectedShopSkill] = useState<PetSkill | null>(null);
-  const [randomMode, setRandomMode] = useState<'solo' | 'battle'>('solo');
+  const [randomMode, setRandomMode] = useState<RandomMode>('solo');
   const [battleStudentA, setBattleStudentA] = useState<Student | null>(null);
   const [battleStudentB, setBattleStudentB] = useState<Student | null>(null);
   const [battleScoreA, setBattleScoreA] = useState<number>(0);
@@ -352,6 +367,13 @@ const App: React.FC = () => {
     ludoTurns: BattleLudoTurn[];
   } | null>(null);
   const [uncalledMap, setUncalledMap] = useState<Record<string, string[]>>({}); // Fair round-robin random queue
+  const [bossStatesByClass, setBossStatesByClass] = useState<Record<string, ClassBossState>>({});
+  const [activeBossRound, setActiveBossRound] = useState<ActiveBossRound | null>(null);
+  const [bossRoundResolving, setBossRoundResolving] = useState(false);
+  const [bossDefeatedAnnouncement, setBossDefeatedAnnouncement] = useState<{
+    boss: BossInstance;
+    topContributors: BossContribution[];
+  } | null>(null);
 
   // Lucky Wheel State
   const [showLuckyWheelModal, setShowLuckyWheelModal] = useState(false);
@@ -445,6 +467,7 @@ const App: React.FC = () => {
   const [showHatchModal, setShowHatchModal] = useState(false);
   const [hatchSuccessMessage, setHatchSuccessMessage] = useState<string>('');
   const [pokemonReleaseEvent, setPokemonReleaseEvent] = useState<PokemonReleaseEvent | null>(null);
+  const [pokemonReleaseQueue, setPokemonReleaseQueue] = useState<PokemonReleaseEvent[]>([]);
 
   // Audio settings
   const [posSoundUrl, setPosSoundUrl] = useState('https://actions.google.com/sounds/v1/foley/ting.ogg');
@@ -570,6 +593,9 @@ const App: React.FC = () => {
             setLuckyWheelDisplayRewards(cloudData.luckyWheelRewards);
             localStorage.setItem(LUCKY_WHEEL_REWARDS_KEY, JSON.stringify(cloudData.luckyWheelRewards));
           }
+          const cloudBossStates = normalizeBossStatesByClass(cloudData.bossStatesByClass || {});
+          setBossStatesByClass(cloudBossStates);
+          localStorage.setItem(BOSS_STATES_KEY, JSON.stringify(cloudBossStates));
           setLastSyncedTime(cloudData.updatedAt || Date.now());
 
           // Save snapshot ref to prevent immediate re-sync of unchanged data
@@ -585,7 +611,8 @@ const App: React.FC = () => {
             wheelSpinSoundUrl: cloudData.wheelSpinSoundUrl || '',
             wheelFinishSoundUrl: cloudData.wheelFinishSoundUrl || '',
             customLudoTiles: cloudData.customLudoTiles || {},
-            luckyWheelRewards: cloudData.luckyWheelRewards || DEFAULT_LUCKY_WHEEL_REWARDS
+            luckyWheelRewards: cloudData.luckyWheelRewards || DEFAULT_LUCKY_WHEEL_REWARDS,
+            bossStatesByClass: cloudBossStates
           });
 
           // Also save a fallback local copy
@@ -625,6 +652,8 @@ const App: React.FC = () => {
 
           const savedLuckyWheelRewards = localStorage.getItem(LUCKY_WHEEL_REWARDS_KEY);
           const localLuckyWheelRewards = savedLuckyWheelRewards ? JSON.parse(savedLuckyWheelRewards) : DEFAULT_LUCKY_WHEEL_REWARDS;
+          const savedBossStates = localStorage.getItem(BOSS_STATES_KEY);
+          const localBossStates = savedBossStates ? normalizeBossStatesByClass(JSON.parse(savedBossStates)) : {};
 
           // Push local state to cloud to prevent data loss on onboarding
           const updatedAt = await upsertUserSettings(user.uid, {
@@ -639,7 +668,8 @@ const App: React.FC = () => {
             wheelSpinSoundUrl,
             wheelFinishSoundUrl,
             customLudoTiles,
-            luckyWheelRewards: localLuckyWheelRewards
+            luckyWheelRewards: localLuckyWheelRewards,
+            bossStatesByClass: localBossStates
           });
 
           lastSyncedSnapshotRef.current = JSON.stringify({
@@ -654,7 +684,8 @@ const App: React.FC = () => {
             wheelSpinSoundUrl,
             wheelFinishSoundUrl,
             customLudoTiles,
-            luckyWheelRewards: localLuckyWheelRewards
+            luckyWheelRewards: localLuckyWheelRewards,
+            bossStatesByClass: localBossStates
           });
           
           setStudents(localStudents);
@@ -664,6 +695,7 @@ const App: React.FC = () => {
           setPetSkills(localPetSkills);
           setLuckyWheelRewards(localLuckyWheelRewards);
           setLuckyWheelDisplayRewards(localLuckyWheelRewards);
+          setBossStatesByClass(localBossStates);
           setLastSyncedTime(updatedAt);
         }
         setCloudLoadSuccess(true);
@@ -696,7 +728,8 @@ const App: React.FC = () => {
       wheelSpinSoundUrl,
       wheelFinishSoundUrl,
       customLudoTiles,
-      luckyWheelRewards
+      luckyWheelRewards,
+      bossStatesByClass
     });
 
     // DIFFERENTIAL INCREMENTAL SYNC CHECK:
@@ -722,6 +755,7 @@ const App: React.FC = () => {
           wheelFinishSoundUrl,
           customLudoTiles,
           luckyWheelRewards,
+          bossStatesByClass
         });
 
         lastSyncedSnapshotRef.current = currentSnapshot;
@@ -734,7 +768,7 @@ const App: React.FC = () => {
     }, 1500); // 1.5s debounce to group multiple rapid edits together
 
     return () => clearTimeout(timer);
-  }, [students, ranksMale, ranksFemale, skills, petSkills, posSoundUrl, negSoundUrl, timerSoundUrl, wheelSpinSoundUrl, wheelFinishSoundUrl, customLudoTiles, luckyWheelRewards, user, initialCloudLoadComplete, cloudLoadSuccess]);
+  }, [students, ranksMale, ranksFemale, skills, petSkills, posSoundUrl, negSoundUrl, timerSoundUrl, wheelSpinSoundUrl, wheelFinishSoundUrl, customLudoTiles, luckyWheelRewards, bossStatesByClass, user, initialCloudLoadComplete, cloudLoadSuccess]);
 
   // Sync Ludo position state maps whenever students array loads or changes
   useEffect(() => {
@@ -835,6 +869,18 @@ const App: React.FC = () => {
         setLuckyWheelRewards(DEFAULT_LUCKY_WHEEL_REWARDS);
         setLuckyWheelDisplayRewards(DEFAULT_LUCKY_WHEEL_REWARDS);
       }
+
+      const savedBossStates = localStorage.getItem(BOSS_STATES_KEY);
+      if (savedBossStates) {
+        try {
+          setBossStatesByClass(normalizeBossStatesByClass(JSON.parse(savedBossStates)));
+        } catch (err) {
+          console.error("Failed to parse saved boss states", err);
+          setBossStatesByClass({});
+        }
+      } else {
+        setBossStatesByClass({});
+      }
     }
   }, [authLoading, user]);
 
@@ -843,6 +889,12 @@ const App: React.FC = () => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(students)); 
     }
   }, [students, user]);
+
+  useEffect(() => {
+    if (!user) {
+      localStorage.setItem(BOSS_STATES_KEY, JSON.stringify(bossStatesByClass));
+    }
+  }, [bossStatesByClass, user]);
 
   useEffect(() => { 
     if (!user) {
@@ -890,12 +942,40 @@ const App: React.FC = () => {
   const homeworkLessonDateKey = getLocalDateKey();
   const editingPetEvolutionPreview = useMemo(() => getNextEvolutionPreview(editingStudent?.pet), [editingStudent?.pet]);
   const classOptions = useMemo(() => classes.filter(c => c !== 'Tất cả'), [classes]);
+  const activeRandomClassName = filterClass !== 'Tất cả' ? filterClass : '';
+  const currentBossState = activeRandomClassName
+    ? normalizeClassBossState(bossStatesByClass[activeRandomClassName], activeRandomClassName)
+    : null;
+  const activeBossParty = activeBossRound
+    ? activeBossRound.partyStudentIds
+      .map(studentId => students.find(student => student.id === studentId))
+      .filter(Boolean) as Student[]
+    : [];
+  const studentsById = useMemo(() => Object.fromEntries(students.map(student => [student.id, student])), [students]);
+  const currentBossTopContributors = currentBossState
+    ? getBossTopContributors(currentBossState).map(contribution => ({
+      contribution,
+      student: studentsById[contribution.studentId]
+    }))
+    : [];
   const luckyWheelBackground = useMemo(() => {
     const rewardsForWheel = luckyWheelDisplayRewards.length > 0 ? luckyWheelDisplayRewards : luckyWheelRewards;
     if (rewardsForWheel.length === 0) return '#facc15';
     const sliceSize = 100 / rewardsForWheel.length;
     return `conic-gradient(${rewardsForWheel.map((reward, idx) => `${reward.color} ${idx * sliceSize}% ${(idx + 1) * sliceSize}%`).join(', ')})`;
   }, [luckyWheelDisplayRewards, luckyWheelRewards]);
+
+  useEffect(() => {
+    if (!activeRandomClassName) return;
+    setBossStatesByClass(prev => {
+      if (prev[activeRandomClassName]) return prev;
+      return {
+        ...prev,
+        [activeRandomClassName]: createClassBossState(activeRandomClassName)
+      };
+    });
+  }, [activeRandomClassName]);
+
   const activeLudoClassName = ludoClassName || (filterClass !== 'Tất cả' ? filterClass : classOptions[0] || '');
   const ludoRaceStudents = useMemo(() => {
     if (!activeLudoClassName) return [];
@@ -1068,11 +1148,25 @@ const App: React.FC = () => {
     1003, 1004, 1007, 1008, 1009, 1010, 1014, 1015, 1016, 1017, 1020, 1021, 1022, 1023, 1024, 1025
   ]);
 
-  const getEggRequiredProgress = (egg?: StudentEgg): number => egg?.requiredProgress || (egg?.kind === 'special' ? 15 : 10);
-  const getEggLabel = (kind: 'normal' | 'special') => kind === 'special' ? 'Trứng đặc biệt' : 'Trứng thường';
-  const getEggCost = (kind: 'normal' | 'special') => kind === 'special' ? 20 : 10;
+  const LEGENDARY_POKEMON_DEX_IDS = new Set([
+    144, 145, 146, 150, 151, 249, 250, 251, 382, 383, 384, 385, 386, 483, 484, 487, 491, 493, 643, 644, 646,
+    716, 717, 718, 719, 720, 721, 888, 889, 890, 898, 1007, 1008, 1024, 1025
+  ]);
 
-  const getRandomEggDexId = (kind: 'normal' | 'special' = 'normal') => {
+  const createInstanceId = (prefix: string): string => {
+    return globalThis.crypto?.randomUUID?.() || `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  };
+
+  const getEggRequiredProgress = (egg?: StudentEgg): number => egg?.requiredProgress || (egg?.kind === 'legendary' ? 30 : egg?.kind === 'special' ? 15 : 10);
+  const getEggLabel = (kind: EggKind) => kind === 'legendary' ? 'Trứng huyền thoại' : kind === 'special' ? 'Trứng đặc biệt' : 'Trứng thường';
+  const getEggCost = (kind: Exclude<EggKind, 'legendary'>) => kind === 'special' ? 20 : 10;
+
+  const getRandomEggDexId = (kind: EggKind = 'normal') => {
+    if (kind === 'legendary') {
+      const legendaryPool = LIST_POKEMONS.filter(pokemon => LEGENDARY_POKEMON_DEX_IDS.has(pokemon.dexId));
+      const pool = legendaryPool.length > 0 ? legendaryPool : LIST_POKEMONS.filter(pokemon => SPECIAL_POKEMON_DEX_IDS.has(pokemon.dexId));
+      return pool[getRandomIndex(pool.length)]?.dexId || 150;
+    }
     const specialPool = LIST_POKEMONS.filter(pokemon => SPECIAL_POKEMON_DEX_IDS.has(pokemon.dexId));
     const normalPool = LIST_POKEMONS.filter(pokemon => !SPECIAL_POKEMON_DEX_IDS.has(pokemon.dexId));
     const useSpecialPool = kind === 'special' || getRandomIndex(100) >= 80;
@@ -1080,12 +1174,15 @@ const App: React.FC = () => {
     return pool[getRandomIndex(pool.length)]?.dexId || 25;
   };
 
-  const createEgg = (kind: 'normal' | 'special' = 'normal'): StudentEgg => ({
+  const createEgg = (kind: EggKind = 'normal', source: StudentEgg['source'] = 'shop'): StudentEgg => ({
+    instanceId: createInstanceId('egg'),
     progress: 0,
     status: 'egg',
     assignedDexId: getRandomEggDexId(kind),
     kind,
-    requiredProgress: kind === 'special' ? 15 : 10
+    requiredProgress: kind === 'legendary' ? 30 : kind === 'special' ? 15 : 10,
+    acquiredAt: Date.now(),
+    source
   });
 
   const advanceEggForStudent = (student: Student, amount: number) => {
@@ -1175,6 +1272,20 @@ const App: React.FC = () => {
     return isSamePokemonPet(a, b);
   };
 
+  const queuePokemonReleaseEvents = (events: PokemonReleaseEvent[]) => {
+    if (events.length === 0) return;
+    setPokemonReleaseEvent(events[0]);
+    setPokemonReleaseQueue(events.slice(1));
+  };
+
+  const showNextPokemonReleaseEvent = () => {
+    setPokemonReleaseQueue(prev => {
+      const [nextEvent, ...rest] = prev;
+      setPokemonReleaseEvent(nextEvent || null);
+      return rest;
+    });
+  };
+
   const handleSelectReplacementPokemon = (pet: PokemonPet) => {
     if (!pokemonReleaseEvent) return;
     setStudents(prev => prev.map(s => {
@@ -1184,7 +1295,7 @@ const App: React.FC = () => {
       if (editingStudent?.id === s.id) setEditingStudent(nextStudent);
       return nextStudent;
     }));
-    setPokemonReleaseEvent(null);
+    showNextPokemonReleaseEvent();
   };
 
   const handleOpenEggAfterRelease = () => {
@@ -1195,7 +1306,7 @@ const App: React.FC = () => {
       setProfileTab('pet');
       setCurrentScreen('profile');
     }
-    setPokemonReleaseEvent(null);
+    showNextPokemonReleaseEvent();
   };
 
   const handleUpdatePoints = async (ids: string[], amount: number, reason: string, source: GameEventSource = 'manual') => {
@@ -1311,6 +1422,10 @@ const App: React.FC = () => {
     setManualPoints('');
     setSelectedStudentIds(source === 'solo' ? ids : []);
     setIsMultiSelectMode(false);
+    if (source === 'solo') {
+      const resolvedClassName = updatedStudents.find(student => ids.includes(student.id))?.className;
+      incrementBossCounterForClass(resolvedClassName);
+    }
   };
 
   const handleBuySkill = (studentId: string, skillId: string, cost: number, skillName: string) => {
@@ -1380,7 +1495,7 @@ const App: React.FC = () => {
 
   const handleBuyNewEgg = (
     studentId: string,
-    kind: 'normal' | 'special' = 'normal',
+    kind: Exclude<EggKind, 'legendary'> = 'normal',
     options: { skipConfirm?: boolean; silent?: boolean } = {}
   ) => {
     const s = students.find(x => x.id === studentId);
@@ -1415,7 +1530,7 @@ const App: React.FC = () => {
     const updatedS: Student = {
       ...s,
       points: nextPoints,
-      egg: createEgg(kind),
+      egg: createEgg(kind, 'shop'),
       pet: undefined, // Clear active pet so they see incubating layout
       pets: ownedPets,
       history: [historyItem, ...s.history].slice(0, 50)
@@ -1430,6 +1545,69 @@ const App: React.FC = () => {
     return true;
   };
 
+  const handleStartInventoryEgg = (studentId: string, eggInstanceId: string) => {
+    const updatedStudents = students.map(student => {
+      if (student.id !== studentId || student.egg?.status === 'egg') return student;
+      const inventory = student.eggInventory || [];
+      const chosenEgg = inventory.find(egg => egg.instanceId === eggInstanceId);
+      if (!chosenEgg) return student;
+      const updatedStudent = {
+        ...student,
+        egg: { ...chosenEgg, status: 'egg' as const },
+        eggInventory: inventory.filter(egg => egg.instanceId !== eggInstanceId)
+      };
+      if (editingStudent?.id === student.id) setEditingStudent(updatedStudent);
+      return updatedStudent;
+    });
+    setStudents(updatedStudents);
+  };
+
+  const renderEggInventory = (student: Student) => {
+    const inventory = student.eggInventory || [];
+    if (inventory.length === 0) return null;
+    const counts = inventory.reduce<Record<string, number>>((acc, egg) => {
+      const label = getEggLabel(egg.kind || 'normal');
+      acc[label] = (acc[label] || 0) + 1;
+      return acc;
+    }, {});
+    const canStartEgg = !student.egg || student.egg.status === 'hatched';
+
+    return (
+      <div className="rounded-[32px] border border-amber-200 bg-amber-50/60 p-5 text-left shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h4 className="font-royal text-xl text-amber-950">🥚 Egg Inventory</h4>
+            <p className="mt-1 text-xs font-bold text-amber-900/70">
+              {Object.entries(counts).map(([label, count]) => `${label} x${count}`).join(' · ')}
+            </p>
+          </div>
+          {!canStartEgg && (
+            <span className="rounded-full bg-white px-3 py-1 text-[10px] font-black uppercase text-amber-700">
+              Đang có trứng trong incubator
+            </span>
+          )}
+        </div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          {inventory.map(egg => (
+            <div key={egg.instanceId || `${egg.kind}-${egg.assignedDexId}-${egg.acquiredAt}`} className="flex items-center justify-between gap-3 rounded-2xl border border-amber-100 bg-white p-3">
+              <div>
+                <p className="text-xs font-black text-amber-950">{getEggLabel(egg.kind || 'normal')}</p>
+                <p className="text-[10px] font-bold text-stone-400">Cần {getEggRequiredProgress(egg)} Hào Quang để nở</p>
+              </div>
+              <button
+                disabled={!canStartEgg || !egg.instanceId}
+                onClick={() => egg.instanceId && handleStartInventoryEgg(student.id, egg.instanceId)}
+                className="rounded-xl bg-amber-600 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-white shadow-sm hover:bg-amber-700 disabled:bg-stone-200 disabled:text-stone-500"
+              >
+                Bắt đầu ấp
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const handleOpenShop = () => {
     if (currentClassStudents.length === 0) {
       alert('Chưa có trainer trong lớp hiện tại để mở Shop.');
@@ -1440,7 +1618,7 @@ const App: React.FC = () => {
     setShowShopModal(true);
   };
 
-  const toggleShopEgg = (studentId: string, kind: 'normal' | 'special') => {
+  const toggleShopEgg = (studentId: string, kind: Exclude<EggKind, 'legendary'>) => {
     setShopSelections(prev => {
       const current = prev[studentId] || { skills: [] };
       return {
@@ -1679,6 +1857,7 @@ const App: React.FC = () => {
       wheelFinishSoundUrl,
       customLudoTiles,
       luckyWheelRewards,
+      bossStatesByClass,
       exportedAt: Date.now()
     };
     const jsonString = JSON.stringify(data, null, 2);
@@ -1742,6 +1921,11 @@ const App: React.FC = () => {
           setLuckyWheelDisplayRewards(data.luckyWheelRewards);
           localStorage.setItem(LUCKY_WHEEL_REWARDS_KEY, JSON.stringify(data.luckyWheelRewards));
         }
+        const importedBossStates = data.bossStatesByClass && typeof data.bossStatesByClass === 'object'
+          ? normalizeBossStatesByClass(data.bossStatesByClass)
+          : {};
+        setBossStatesByClass(importedBossStates);
+        localStorage.setItem(BOSS_STATES_KEY, JSON.stringify(importedBossStates));
 
         // Trigger immediate sync to Supabase if user is authenticated
         if (user) {
@@ -1758,7 +1942,8 @@ const App: React.FC = () => {
               wheelSpinSoundUrl: data.wheelSpinSoundUrl || wheelSpinSoundUrl,
               wheelFinishSoundUrl: data.wheelFinishSoundUrl || wheelFinishSoundUrl,
               customLudoTiles: data.customLudoTiles || customLudoTiles,
-              luckyWheelRewards: data.luckyWheelRewards || luckyWheelRewards
+              luckyWheelRewards: data.luckyWheelRewards || luckyWheelRewards,
+              bossStatesByClass: importedBossStates
           }).then((updatedAt) => {
             setLastSyncedTime(updatedAt);
             setIsSyncing(false);
@@ -2292,13 +2477,85 @@ const App: React.FC = () => {
     );
   };
 
-  const handleRandom = (forceMode?: 'solo' | 'battle') => {
+  const incrementBossCounterForClass = (className?: string) => {
+    if (!className) return;
+    setBossStatesByClass(prev => {
+      const state = normalizeClassBossState(prev[className], className);
+      return {
+        ...prev,
+        [className]: incrementBossEncounterCounter(state)
+      };
+    });
+  };
+
+  const openBossEncounter = (className: string, state: ClassBossState): boolean => {
+    const classStudents = students.filter(student => student.className === className);
+    const { party, nextQueue } = selectBossParty(classStudents, state.participantQueue, state.previousPartyIds);
+    if (party.length < BOSS_PARTY_SIZE) {
+      alert(`Boss đã xuất hiện nhưng cần ít nhất ${BOSS_PARTY_SIZE} trainer đang có Pokémon để chiến đấu.`);
+      return false;
+    }
+
+    const round: ActiveBossRound = {
+      roundId: createInstanceId('boss-round'),
+      bossInstanceId: state.boss.instanceId,
+      className,
+      partyStudentIds: party.map(student => student.id),
+      openedAt: Date.now()
+    };
+
+    setBossStatesByClass(prev => ({
+      ...prev,
+      [className]: {
+        ...state,
+        encounterReady: true,
+        participantQueue: nextQueue,
+        updatedAt: Date.now()
+      }
+    }));
+    setActiveBossRound(round);
+    setRandomMode('boss');
+    setRandomStudent(null);
+    setBattleStudentA(null);
+    setBattleStudentB(null);
+    setBattleResultSummary(null);
+    setSelectedStudentIds(round.partyStudentIds);
+    setShowRandomModal(true);
+    return true;
+  };
+
+  const handleRandom = (forceMode?: RandomMode) => {
     setBattleResultSummary(null);
     const available = presentStudents;
     if (available.length === 0) return alert("Không có trainer nào hiện diện.");
+
+    if (activeRandomClassName) {
+      if (activeBossRound?.className === activeRandomClassName) {
+        setRandomMode('boss');
+        setSelectedStudentIds(activeBossRound.partyStudentIds);
+        setShowRandomModal(true);
+        return;
+      }
+      const bossState = normalizeClassBossState(bossStatesByClass[activeRandomClassName], activeRandomClassName);
+      const bossReady = isBossEncounterReady(bossState);
+      if (bossReady && openBossEncounter(activeRandomClassName, { ...bossState, encounterReady: true })) return;
+      if (forceMode === 'boss') {
+        setActiveBossRound(null);
+        setRandomMode('boss');
+        setShowRandomModal(true);
+        return;
+      }
+    } else if (forceMode === 'boss') {
+      setActiveBossRound(null);
+      setRandomMode('boss');
+      setShowRandomModal(true);
+      return;
+    }
     
     // Pick mode: if forceMode provided use it, otherwise randomly pick solo or battle (50/50 if available.length >= 2)
-    const mode = forceMode || (available.length >= 2 ? (Math.random() > 0.5 ? 'battle' : 'solo') : 'solo');
+    const mode = forceMode && forceMode !== 'boss'
+      ? forceMode
+      : (available.length >= 2 ? (Math.random() > 0.5 ? 'battle' : 'solo') : 'solo');
     setRandomMode(mode);
 
     if (mode === 'solo') {
@@ -2331,6 +2588,127 @@ const App: React.FC = () => {
     }
 
     setShowRandomModal(true);
+  };
+
+  const applyAuraRewardToStudent = (student: Student, amount: number, reason: string, timestamp: number): Student => {
+    const historyItem: HistoryItem = {
+      id: `${timestamp}${Math.random()}`,
+      amount,
+      reason,
+      timestamp
+    };
+    let currentStudent: Student = {
+      ...normalizeStudentPokemonData(student),
+      points: student.points + amount
+    };
+    const eggResult = advanceEggForStudent(currentStudent, amount);
+    currentStudent = eggResult.student;
+    if (currentStudent.pet && amount !== 0) {
+      const hpUpdate = applyPetHpDeltaToStudent(
+        currentStudent,
+        amount,
+        `${reason}: ${amount > 0 ? 'hồi' : 'mất'} ${Math.abs(amount)} HP`
+      );
+      currentStudent = hpUpdate.student;
+    }
+    return {
+      ...currentStudent,
+      history: [historyItem, ...currentStudent.history].slice(0, 50)
+    };
+  };
+
+  const handleResolveBossRound = (result: 'success' | 'failure') => {
+    if (!activeBossRound || bossRoundResolving) return;
+    const className = activeBossRound.className;
+    const state = normalizeClassBossState(bossStatesByClass[className], className);
+    if (state.boss.instanceId !== activeBossRound.bossInstanceId) {
+      alert('Boss round này đã cũ. Hãy Random lại để mở encounter mới.');
+      setActiveBossRound(null);
+      return;
+    }
+
+    setBossRoundResolving(true);
+    const timestamp = Date.now();
+    const partyIds = activeBossRound.partyStudentIds;
+    const resolution = result === 'success'
+      ? resolveBossSuccess(state, partyIds, activeBossRound.roundId, timestamp)
+      : resolveBossFailure(state, partyIds, activeBossRound.roundId, timestamp);
+    const topRewardIds = resolution.bossDefeated ? new Set(resolution.topContributors.map(contribution => contribution.studentId)) : new Set<string>();
+    const releaseEvents: PokemonReleaseEvent[] = [];
+
+    const updatedStudents = students.map(student => {
+      let nextStudent = normalizeStudentPokemonData(student);
+
+      if (result === 'success' && partyIds.includes(student.id)) {
+        nextStudent = applyAuraRewardToStudent(
+          nextStudent,
+          5,
+          `👹 Boss Raid thành công: +5 Hào Quang`,
+          timestamp
+        );
+      }
+
+      if (result === 'failure' && partyIds.includes(student.id)) {
+        const hpUpdate = applyPetHpDeltaToStudent(
+          nextStudent,
+          -state.boss.failDamage,
+          `👹 Boss phản công: Pokémon -${state.boss.failDamage} HP`
+        );
+        nextStudent = hpUpdate.student;
+        if (hpUpdate.releaseEvent) releaseEvents.push(hpUpdate.releaseEvent);
+        nextStudent = {
+          ...nextStudent,
+          history: [{
+            id: `${timestamp}${Math.random()}`,
+            amount: 0,
+            reason: `👹 Boss phản công: Pokémon -${state.boss.failDamage} HP`,
+            timestamp
+          }, ...nextStudent.history].slice(0, 50)
+        };
+      }
+
+      if (topRewardIds.has(student.id)) {
+        nextStudent = applyAuraRewardToStudent(
+          nextStudent,
+          5,
+          `🏆 Top 5 Boss Contributor: +5 Hào Quang + Legendary Egg`,
+          timestamp
+        );
+        nextStudent = {
+          ...nextStudent,
+          eggInventory: [createEgg('legendary', 'boss'), ...(nextStudent.eggInventory || [])]
+        };
+      }
+
+      return nextStudent;
+    });
+
+    setStudents(updatedStudents);
+    setBossStatesByClass(prev => ({
+      ...prev,
+      [className]: resolution.state
+    }));
+    setActiveBossRound(null);
+    setSelectedStudentIds([]);
+    setBossRoundResolving(false);
+
+    if (releaseEvents.length > 0) queuePokemonReleaseEvents(releaseEvents);
+    if (resolution.bossDefeated) {
+      setBossDefeatedAnnouncement({
+        boss: {
+          ...state.boss,
+          currentHp: 0,
+          defeatedAt: timestamp
+        },
+        topContributors: resolution.topContributors
+      });
+    }
+
+    const eventMessage = result === 'success'
+      ? `Perfect Team Attack: ${state.boss.name} -${resolution.damageDealt} HP`
+      : `${state.boss.name} phản công: Pokémon -${state.boss.failDamage} HP`;
+    showPokemonReaction([{ type: result === 'success' ? 'hp' : 'random-drop', message: eventMessage }], result === 'success' ? 'Boss Raid thành công' : 'Boss Raid thất bại');
+    new Audio(result === 'success' ? posSoundUrl : negSoundUrl).play().catch(() => {});
   };
 
   const getLuckyWheelValidRewards = (student: Student) => {
@@ -2774,6 +3152,7 @@ const App: React.FC = () => {
       resultMsg,
       ludoTurns
     });
+    incrementBossCounterForClass(updatedA.className);
   };
 
   // Student Custom Avatar Upload Handlers
@@ -3989,6 +4368,8 @@ const App: React.FC = () => {
                       </div>
                     </div>
 
+                    {renderEggInventory(editingStudent)}
+
                     {/* OWNED PORTFOLIO SELECTION IN EGG SCREEN (WHEN WAITING FOR HATCH) */}
                     {editingStudent.pets && editingStudent.pets.length > 0 && (
                       <div className="bg-amber-50/30 p-6 rounded-[32px] border border-amber-200/30 space-y-4">
@@ -4029,6 +4410,8 @@ const App: React.FC = () => {
                 ) : (
                   /* PET CORNER DETAILED STORE & CUSTOMIZATION */
                   <div className="space-y-8 animate-in fade-in duration-300">
+                    {renderEggInventory(editingStudent)}
+
                     <div className="bg-amber-50/50 rounded-3xl border border-amber-200/50 p-6 flex flex-col md:flex-row gap-6 items-center">
                       <div className="shrink-0 w-44 h-44 bg-white rounded-2xl border-4 border-amber-300 p-4 flex items-center justify-center relative shadow-lg overflow-hidden group">
                         <div className="absolute inset-0 bg-radial-gradient from-amber-200/50 via-transparent to-transparent opacity-60 group-hover:scale-125 transition-transform" />
@@ -4802,7 +5185,7 @@ const App: React.FC = () => {
           onClick={(e) => { if (e.target === e.currentTarget) setShowRandomModal(false); }}
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md overflow-y-auto"
         >
-          <div className="bg-white p-6 sm:p-8 rounded-[40px] w-full max-w-2xl text-center shadow-2xl animate-in zoom-in duration-300 relative border-4 border-red-800 my-auto">
+          <div className="bg-white p-6 sm:p-8 rounded-[40px] w-full max-w-5xl text-center shadow-2xl animate-in zoom-in duration-300 relative border-4 border-red-800 my-auto">
             <button 
               onClick={() => setShowRandomModal(false)} 
               className="absolute top-5 right-5 text-3xl text-gray-400 hover:text-red-800 transition-colors z-20"
@@ -4824,7 +5207,59 @@ const App: React.FC = () => {
               >
                 ⚔️ Chế độ Battle
               </button>
+              <button
+                onClick={() => handleRandom('boss')}
+                className={`px-5 py-2 rounded-full font-bold text-xs transition-all uppercase tracking-wider ${randomMode === 'boss' ? 'bg-red-800 text-white shadow-md' : 'text-red-900 hover:bg-red-100'}`}
+              >
+                👹 Boss
+              </button>
             </div>
+
+            {/* BOSS MODE */}
+            {randomMode === 'boss' && (
+              <>
+                {activeBossRound && currentBossState && activeBossParty.length === BOSS_PARTY_SIZE ? (
+                  <BossBattlePanel
+                    boss={currentBossState.boss}
+                    party={activeBossParty}
+                    topContributors={currentBossTopContributors}
+                    randomsSinceLastEncounter={currentBossState.randomsSinceLastEncounter}
+                    resolving={bossRoundResolving}
+                    onSuccess={() => handleResolveBossRound('success')}
+                    onFailure={() => handleResolveBossRound('failure')}
+                  />
+                ) : (
+                  <div className="mx-auto max-w-2xl rounded-[32px] border-2 border-red-100 bg-red-50 p-8 text-center">
+                    <div className="text-6xl">👹</div>
+                    <h2 className="mt-4 text-3xl font-royal text-red-900">Boss đang ẩn nấp</h2>
+                    <p className="mt-3 text-sm font-bold text-red-800">
+                      Boss vẫn đang ở đâu đó. Tiếp tục Random Solo/Battle để tìm Boss.
+                    </p>
+                    <p className="mt-4 rounded-2xl bg-white px-4 py-3 text-xs font-black uppercase tracking-wider text-red-700">
+                      {currentBossState
+                        ? `Normal Random since last encounter: ${currentBossState.randomsSinceLastEncounter}`
+                        : 'Chọn một lớp cụ thể để kích hoạt Boss Raid per-class.'}
+                    </p>
+                    {currentBossState && (
+                      <div className="mt-5 rounded-2xl border border-amber-200 bg-white p-4 text-left">
+                        <p className="text-xs font-black text-amber-950">
+                          Boss hiện tại: {currentBossState.boss.icon} {currentBossState.boss.name}
+                        </p>
+                        <div className="mt-2 h-3 overflow-hidden rounded-full bg-stone-100">
+                          <div
+                            className="h-full rounded-full bg-amber-500"
+                            style={{ width: `${Math.max(0, Math.min(100, (currentBossState.boss.currentHp / currentBossState.boss.maxHp) * 100))}%` }}
+                          />
+                        </div>
+                        <p className="mt-1 text-[10px] font-black text-stone-500">
+                          HP {currentBossState.boss.currentHp}/{currentBossState.boss.maxHp}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
 
             {/* SOLO MODE */}
             {randomMode === 'solo' && randomStudent && (
@@ -6006,7 +6441,7 @@ const App: React.FC = () => {
                     onClick={() => {
                       if (!releaseStudent) return;
                       const bought = handleBuyNewEgg(releaseStudent.id);
-                      if (bought) setPokemonReleaseEvent(null);
+                      if (bought) showNextPokemonReleaseEvent();
                     }}
                     className="bg-rose-700 hover:bg-rose-800 disabled:bg-gray-300 disabled:text-gray-500 text-white px-8 py-3.5 rounded-2xl font-black uppercase tracking-wider shadow-lg transition-all"
                   >
@@ -6021,7 +6456,7 @@ const App: React.FC = () => {
                     </button>
                   </div>
                   <button
-                    onClick={() => setPokemonReleaseEvent(null)}
+                    onClick={showNextPokemonReleaseEvent}
                     className="text-xs font-bold uppercase tracking-wider text-gray-500 hover:text-gray-800"
                   >
                     Tiếp tục học không có Pokémon

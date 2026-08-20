@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { LuckyWheelReward, RankInfo, Skill, Student, LudoTileSpec } from './types';
+import { ClassBossState, LuckyWheelReward, RankInfo, Skill, Student, LudoTileSpec } from './types';
 import { PetSkill } from './pokemonData';
 
 export interface UserSettingsData {
@@ -15,6 +15,7 @@ export interface UserSettingsData {
   wheelFinishSoundUrl?: string;
   customLudoTiles?: Record<number, LudoTileSpec>;
   luckyWheelRewards?: LuckyWheelReward[];
+  bossStatesByClass?: Record<string, ClassBossState>;
   updatedAt?: number;
 }
 
@@ -63,6 +64,7 @@ export const fetchUserSettings = async (userId: string): Promise<UserSettingsDat
     wheelFinishSoundUrl: data.wheel_finish_sound_url || '',
     customLudoTiles: data.custom_ludo_tiles || {},
     luckyWheelRewards: Array.isArray(data.lucky_wheel_rewards) ? data.lucky_wheel_rewards : undefined,
+    bossStatesByClass: data.boss_states_by_class || {},
     updatedAt: data.updated_at_ms || undefined
   };
 };
@@ -85,6 +87,7 @@ export const upsertUserSettings = async (userId: string, settings: UserSettingsD
       wheel_finish_sound_url: settings.wheelFinishSoundUrl || '',
       custom_ludo_tiles: sanitizeForSupabase(settings.customLudoTiles || {}),
       lucky_wheel_rewards: sanitizeForSupabase(settings.luckyWheelRewards || []),
+      boss_states_by_class: sanitizeForSupabase(settings.bossStatesByClass || {}),
       updated_at_ms: updatedAt,
       updated_at: new Date(updatedAt).toISOString()
     }, { onConflict: 'user_id' });

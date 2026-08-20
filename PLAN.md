@@ -1,1982 +1,2355 @@
-# PLAN.md — Imperial School: Pokémon Companion System 2.0
+# PLAN.md — Imperial School 3.0: Trainer Journey + Boss Raid
 
-> Tài liệu triển khai dành cho Codex.  
-> Mục tiêu: nâng Imperial School từ hệ thống thi đua + Random/Battle thành một **Pokémon Companion RPG chạy thụ động phía sau tiết học**, gần như không tăng thao tác cho giáo viên.
-
----
-
-## 0. Bối cảnh sản phẩm
-
-Imperial School hiện là app React + TypeScript + Vite, dùng Supabase để đồng bộ snapshot dữ liệu người dùng.
-
-Các tính năng hiện đã có và **phải được giữ nguyên**:
-
-- Quản lý học sinh theo lớp.
-- Điểm Hào Quang và Rank.
-- Cộng/trừ điểm và lịch sử.
-- Điểm danh / đánh dấu vắng.
-- Random Solo.
-- Random Battle.
-- Pokémon/Linh thú hộ mệnh.
-- HP Pokémon.
-- Ấp trứng Pokémon.
-- Sở hữu nhiều Pokémon (`pets[]`) và chọn 1 Pokémon active (`pet`).
-- Evolution chain.
-- Pokémon Skills, mỗi skill dùng tối đa 2 lần.
-- Hợp nhất Pokémon.
-- Lucky Wheel.
-- Cá Ngựa.
-- Supabase Auth + cloud sync.
-- JSON backup/import.
-
-### Các file hiện tại quan trọng
-
-- `App.tsx` — file chính, hiện khoảng 4.7k dòng, chứa phần lớn game logic/UI.
-- `types.ts` — `Student`, `PokemonPet`, `HistoryItem`, v.v.
-- `pokemonData.ts` — danh sách Pokémon, skill, evolution chain.
-- `constants.ts` — cấu hình mặc định.
-- `components/StudentCard.tsx`
-- `components/LiquidDock.tsx`
-- `supabaseData.ts`
-- `supabase-schema.sql`
-- `Progress.md`
-
-### Logic HP/Pokémon đã tồn tại
-
-App hiện đã có nền cho:
-
-- `applyPetHpDelta(...)`
-- `releasePetFromStudent(...)`
-- `pokemonReleaseEvent`
-- modal khi Pokémon về 0 HP.
-- chọn Pokémon còn lại sau khi Pokémon active bị mất.
-- nếu hết Pokémon thì mở màn hình mua/ấp trứng.
-
-**Không được xóa hoặc đổi triết lý cơ chế này.** Phần mới phải xây tiếp trên đó.
+> Tài liệu triển khai dành cho Codex, viết dựa trên code mới nhất của Imperial School.
+>
+> Mục tiêu: tiếp tục mở rộng hệ Pokémon theo hướng **passive / automatic**, tăng attachment và mục tiêu dài hạn cho học sinh nhưng **không làm giáo viên mất thêm thời gian trong 60 phút chữa bài**.
+>
+> Tính năng trọng tâm mới của phiên bản này: **BOSS RAID trong Random**.
 
 ---
 
-# 1. Product Goal
+# 0. PRODUCT CONTEXT
 
-Imperial School phải phù hợp với thực tế lớp học 90 phút:
+Imperial School dùng trong lesson 90 phút:
 
-- ~30 phút Listening Dictation không dùng Imperial School.
-- ~60 phút còn lại giáo viên chữa rất nhiều bài.
-- Giáo viên chủ yếu dùng Random Solo/Battle để gọi học sinh.
-- Không có nhiều thời gian cho mini game riêng.
-- Không nên yêu cầu học sinh chủ động giơ tay để hệ thống hoạt động.
+- Khoảng 30 phút: Listening Dictation, không dùng Imperial School.
+- Khoảng 60 phút: giáo viên chữa nhiều bài tập.
+- Workflow chính hiện tại là:
+  1. Random Solo hoặc Battle.
+  2. Học sinh trả lời.
+  3. Giáo viên cộng/trừ điểm hoặc chốt Battle.
+  4. Tiếp tục chữa bài.
 
-## Nguyên tắc sản phẩm quan trọng nhất
+Do đó mọi tính năng mới phải tuân theo nguyên tắc:
 
 > **Teacher Interaction Budget ≈ 0**
 
-Một tính năng mới chỉ tốt nếu nó chủ yếu tự hoạt động từ các hành động giáo viên vốn đã làm:
-
-1. Random Solo.
-2. Random Battle.
-3. Chấm/cộng/trừ điểm.
-4. Điểm danh.
-5. Một thao tác Homework Check cực nhanh nếu cần.
-
-Không thêm workflow buộc giáo viên phải dừng tiết học để chơi mini game mới.
+Không biến Imperial School thành một game cần dừng tiết học lâu để thao tác.
 
 ---
 
-# 2. Core Game Philosophy
+# 1. CURRENT CODEBASE — NHỮNG GÌ ĐÃ CÓ
 
-Hệ thống mới phải tạo cảm giác:
+Code mới nhất hiện đã có:
 
-> “Đây là Pokémon của mình. Nó có Level, XP, Bond, Streak, Passive Ability, có thể tiến hóa, có thể trở thành Shiny, và những lần mình trả lời trong lớp trực tiếp giúp nó lớn lên.”
-
-Tách 2 hệ progression:
-
-## Hào Quang
-
-- Là thành tích học tập / Rank của học sinh.
-- Có thể tăng hoặc giảm.
-- Vẫn ảnh hưởng trực tiếp đến HP Pokémon theo cơ chế hiện tại.
-
-## Pokémon Progression
-
-- XP.
-- Level.
+- React + TypeScript + Vite.
+- Supabase cloud sync.
+- JSON backup/import.
+- Student management theo lớp.
+- Attendance Check.
+- Homework Check.
+- Hào Quang + Rank.
+- Random Solo.
+- Random Battle.
+- Fair round-robin queue cho Solo (`uncalledMap`).
+- Pokémon active `student.pet`.
+- Pokémon collection `student.pets[]`.
+- `PokemonPet.instanceId`.
+- HP Pokémon.
+- Pokémon bị mất khi HP = 0.
+- Modal chọn Pokémon khác sau khi Pokémon bị mất.
+- Mua/ấp trứng khi không còn Pokémon.
+- Normal Egg / Special Egg.
+- Pokémon XP + Level.
 - Bond.
-- Passive Ability.
 - Charge.
-- Streak bonuses.
-- Evolution.
+- Passive Ability.
+- Answer Streak.
+- Battle Win Streak.
+- Homework Streak.
+- Attendance Streak.
+- Random Drop.
 - Shiny.
 - Mastery.
+- Evolution.
+- Pokémon Skills.
+- Lucky Wheel.
+- Cá Ngựa.
 
-Pokémon progression **không bị giảm** khi học sinh bị trừ điểm. Hình phạt đã được thể hiện bằng:
+Các file quan trọng hiện tại:
 
-- Hào Quang giảm.
-- Pokémon mất HP.
-- Nếu HP = 0 thì mất Pokémon.
-
-Không trừ thêm Pokémon XP/Bond để tránh punishment stacking quá nặng.
-
----
-
-# 3. NON-NEGOTIABLE RULES — KHÔNG ĐƯỢC THAY ĐỔI
-
-## 3.1. Hào Quang và HP
-
-Giữ cơ chế:
-
-- Học sinh được `+N` Hào Quang từ thưởng/chấm điểm → Pokémon active hồi `+N HP`.
-- Học sinh bị `-N` Hào Quang từ thưởng/phạt/chấm điểm → Pokémon active mất `N HP`.
-- HP luôn clamp trong `0..100`.
-
-Ví dụ:
-
-- `+3 Hào Quang` → Pokémon `+3 HP`.
-- `-5 Hào Quang` → Pokémon `-5 HP`.
-
-### Không áp dụng HP damage khi “tiêu tiền”
-
-Các thao tác dùng Hào Quang như currency:
-
-- mua skill,
-- mua trứng,
-- các purchase tương tự,
-
-**không gây damage HP**.
-
-Lý do: đây là spending, không phải punishment. Không để học sinh giết Pokémon chỉ vì mua skill.
-
-## 3.2. Battle giữ luật riêng hiện tại
-
-Battle hiện có luật:
-
-- Người thắng: Pokémon hồi HP bằng `|scoreA - scoreB|`.
-- Người thua: Pokémon mất HP bằng `|scoreA - scoreB|`.
-- Học sinh vẫn nhận Hào Quang theo score Battle.
-
-**Giữ logic này.**
-
-Không được áp dụng thêm generic Aura→HP lần thứ hai trong Battle, nếu không sẽ double damage/double heal.
-
-## 3.3. HP = 0 → MẤT Pokémon
-
-Đây là luật lõi.
-
-Khi Pokémon active có HP <= 0:
-
-1. Pokémon đó bị remove khỏi `student.pets`.
-2. `student.pet = undefined`.
-3. Ghi History rõ ràng.
-4. Hiện modal toàn màn hình ngay.
-5. Nếu học sinh còn Pokémon khác:
-   - hiển thị tất cả Pokémon còn lại,
-   - cho học sinh chọn Pokémon active mới.
-6. Nếu học sinh không còn Pokémon:
-   - hiển thị trạng thái “Bạn không còn Pokémon”.
-   - CTA mua trứng mới.
-   - giá trứng tiếp tục dùng logic hiện tại, mặc định 10 Hào Quang.
-7. Không tự tặng Pokémon miễn phí.
-8. Không tự hồi sinh Pokémon đã mất.
-
-### Nếu không đủ Hào Quang để mua trứng
-
-Không được tạo soft-lock toàn app.
-
-- Nút mua trứng hiển thị disabled.
-- Hiển thị số Hào Quang còn thiếu.
-- Cho phép đóng màn hình và tiếp tục học không có Pokémon.
-- Khi đủ Hào Quang, học sinh có thể vào profile mua trứng như hiện tại.
-
-## 3.4. Release modal không được biến thành “Fainted”
-
-Không đổi thành cơ chế bất tỉnh/hồi sinh.
-
-Pokémon hết HP là **mất khỏi collection** đúng yêu cầu sản phẩm.
-
----
-
-# 4. Technical Direction
-
-`App.tsx` đang quá lớn. Không tiếp tục nhồi toàn bộ logic Pokémon mới vào file này.
-
-## Tạo các module mới
-
-### `pokemonProgression.ts`
-
-Chứa pure functions:
-
-- XP.
-- Level.
-- evolution threshold.
-- Bond.
-- Charge.
-- Streak bonus.
-- Mastery.
-- helper migration cho Pokémon cũ.
-
-### `pokemonPassives.ts`
-
-Chứa:
-
-- passive definitions.
-- mapping Pokémon/baseDexId → passive.
-- passive description.
-- passive effect resolver.
-
-### `gameEvents.ts`
-
-Chứa event types + logic áp dụng progression từ event.
-
-Ví dụ:
-
-```ts
-export type GameEventType =
-  | 'SOLO_RESULT'
-  | 'BATTLE_RESULT'
-  | 'AURA_ADJUSTMENT'
-  | 'HOMEWORK_COMPLETE'
-  | 'HOMEWORK_MISSING'
-  | 'EGG_HATCHED'
-  | 'POKEMON_ACQUIRED';
-```
-
-Mục tiêu: tránh việc `handleUpdatePoints`, `handleResolveBattle`, Lucky Wheel, v.v. mỗi nơi tự viết một phiên bản game logic khác nhau.
-
-### Components mới đề xuất
-
+- `App.tsx`
+- `types.ts`
+- `pokemonData.ts`
+- `pokemonProgression.ts`
+- `pokemonPassives.ts`
+- `gameEvents.ts`
+- `gameEvents.test.ts`
 - `components/PokemonMiniStatus.tsx`
-- `components/PokemonProgressPanel.tsx`
 - `components/PokemonReactionToast.tsx`
-- `components/PokemonReleaseModal.tsx`
 - `components/HomeworkCheckModal.tsx`
-- `components/PokemonPassiveBadge.tsx`
+- `components/AttendanceCheckModal.tsx`
+- `supabaseData.ts`
 
-Không bắt buộc refactor tất cả UI ngay. Làm từng phần để giảm rủi ro.
-
----
-
-# 5. Data Model 2.0
-
-## 5.1. `PokemonPet`
-
-Mở rộng interface hiện tại.
-
-```ts
-export interface PokemonPet {
-  // NEW: stable identity for each individual Pokémon
-  instanceId: string;
-
-  dexId: number;
-  baseDexId?: number;
-  name: string;
-  speciesName?: string;
-  nickname?: string;
-  types: string[];
-
-  hp?: number;
-
-  // EXISTING
-  accessories: string[];
-  skills: string[];
-  skillUses?: Record<string, number>;
-
-  // NEW PROGRESSION
-  level?: number;
-  xp?: number;
-  totalXp?: number;
-  bond?: number;
-  charge?: number;
-
-  // NEW RARITY / END GAME
-  isShiny?: boolean;
-  masteryXp?: number;
-  masteryStars?: number;
-
-  // NEW PASSIVE
-  passiveId?: string;
-}
-```
-
-### `instanceId` là bắt buộc trong model mới
-
-Hiện `isSamePokemon()` đang dựa vào:
-
-- `dexId`
-- `name`
-- `baseDexId`
-
-Điều này không đủ an toàn nếu học sinh sở hữu 2 Pokémon cùng loài hoặc đổi nickname.
-
-Sau migration:
-
-- mọi Pokémon phải có `instanceId` duy nhất.
-- mọi thao tác select/remove/fusion/update collection phải ưu tiên compare `instanceId`.
-- chỉ fallback sang logic cũ cho dữ liệu legacy chưa migrate.
-
-Có thể tạo ID bằng:
-
-```ts
-crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`
-```
-
-## 5.2. Tên loài và nickname
-
-Hiện `name` vừa được dùng như species name vừa được dùng để rename pet.
-
-Không để evolution phá nickname.
-
-Quy ước mới:
-
-- `speciesName`: tên Pokémon canonical theo evolution hiện tại.
-- `nickname`: tên học sinh đặt.
-- UI display name = `nickname || speciesName || name`.
-- Giữ `name` để backward compatibility, nhưng code mới không nên dùng `name` làm identity.
-
-## 5.3. Student progression
-
-Mở rộng `Student`:
-
-```ts
-export interface StudentPokemonProgress {
-  answerStreak: number;
-  bestAnswerStreak: number;
-
-  battleWinStreak: number;
-  bestBattleWinStreak: number;
-
-  homeworkStreak: number;
-  bestHomeworkStreak: number;
-  lastHomeworkLessonKey?: string;
-
-  positiveSoloCount?: number;
-  battleWins?: number;
-}
-
-export interface PokemonPokedexEntry {
-  dexId: number;
-  discovered: boolean;
-  shinyDiscovered?: boolean;
-  firstDiscoveredAt?: number;
-}
-
-export interface Student {
-  ...existingFields;
-
-  pokemonProgress?: StudentPokemonProgress;
-  pokedex?: Record<number, PokemonPokedexEntry>;
-}
-```
-
-Không cần SQL migration riêng cho các field nested này vì `students` đã được lưu trong JSONB của `user_settings`.
+Không được phá các flow hiện tại khi triển khai phiên bản này.
 
 ---
 
-# 6. Backward-Compatible Migration
+# 2. NON-NEGOTIABLE GAME RULES
 
-App đang có dữ liệu thật. Migration phải tự động và an toàn.
+## 2.1. Hào Quang ↔ HP Pokémon
 
-Tạo:
+Giữ nguyên triết lý hiện tại:
 
-```ts
-normalizeStudentPokemonData(student: Student): Student
-normalizePokemonPet(pet: PokemonPet, student?: Student): PokemonPet
-```
+- Thưởng `+N Hào Quang` từ học tập → Pokémon active hồi `+N HP`.
+- Phạt `-N Hào Quang` → Pokémon active mất `N HP`.
+- HP clamp trong `0..100`.
 
-Chạy khi:
+Không gây HP damage khi học sinh **tiêu** Hào Quang để mua item/skill/trứng.
 
-- load local data,
-- load Supabase data,
-- import JSON backup.
+## 2.2. Battle
 
-## Giá trị mặc định cho Pokémon legacy
+Giữ nguyên Battle hiện tại:
 
-Nếu field không tồn tại:
+- Winner/loser HP theo chênh lệch Battle.
+- Không double-apply Aura→HP lần thứ hai.
 
-- `instanceId` → generate mới.
-- `hp` → `100` nếu undefined.
-- `level` → infer từ evolution stage hiện tại, không làm Pokémon bị tụt dạng.
-- `xp` → `0`.
-- `totalXp` → giá trị minimum tương ứng level đã infer.
-- `bond` → `0`.
-- `charge` → `0`.
-- `isShiny` → `false`.
-- `masteryXp` → `0`.
-- `masteryStars` → `0`.
-- `passiveId` → derive từ `baseDexId`.
-- `speciesName` → derive từ `dexId`.
+## 2.3. Pokémon HP = 0
 
-## Không được de-evolve Pokémon cũ
+Giữ nguyên luật lõi:
 
-Ví dụ học sinh hiện đã có Charizard do Hào Quang cũ cao:
+- Pokémon HP <= 0 → Pokémon đó mất khỏi collection.
+- Không revive.
+- Nếu còn Pokémon → bắt buộc chọn Pokémon khác.
+- Nếu hết Pokémon → có thể mua trứng.
+- Nếu không đủ Hào Quang → không khóa app.
 
-- migrate sang Level tối thiểu tương ứng Charizard.
-- giữ Charizard.
-- sau migration, evolution mới dùng Pokémon Level.
+Boss Raid cũng phải dùng đúng luật này.
+
+## 2.4. Không Global Pokédex
+
+**Không phát triển Global Pokédex.**
+
+Không thêm:
+
+- Pokédex toàn hệ thống.
+- Tỷ lệ collection toàn server.
+- So sánh Pokédex giữa lớp.
+- Global collection leaderboard.
+
+Collection cá nhân hiện có (`pets[]`) vẫn được giữ vì đó là tài sản Pokémon của từng học sinh.
 
 ---
 
-# 7. Pokémon XP & Level — PHASE 1
+# 3. FEATURE PRIORITIES FOR IMPERIAL SCHOOL 3.0
 
-Đây là hệ thống quan trọng nhất.
+Thứ tự ưu tiên:
 
-## 7.1. XP không thay Hào Quang
+1. **Boss Raid trong Random — PRIORITY P0**
+2. Legendary Egg + Egg Inventory — P0, dependency của Boss reward.
+3. Pokémon Nature / Personality — P1.
+4. Trainer Level + Trainer Titles — P1.
+5. Gym Badges — P1.
+6. Pokémon Expedition — P1.
+7. Weekly Chest — P2.
+8. Adventure Journal — P2.
+9. Support Pokémon + Synergy — P3.
+10. Cosmetic Aura / Mastery visuals — P3.
 
-Hào Quang vẫn chạy y hệt.
+Không làm tất cả cùng một commit.
 
-Pokémon XP là một progression song song.
+---
 
-## 7.2. XP rules mặc định
+# 4. BOSS RAID — PRODUCT DESIGN
 
-### Solo
+## 4.1. Mục tiêu
 
-Khi giáo viên chấm qua luồng Random Solo:
+Boss phải tạo cảm giác:
 
-| Kết quả | Pokémon XP |
-|---|---:|
-| +1 Hào Quang | +5 XP |
-| +2 | +10 XP |
-| +3 | +15 XP |
-| +4 | +20 XP |
-| +5 hoặc hơn | +25 XP tối đa từ base result |
+> “Sau nhiều lượt Random bình thường, Boss bất ngờ xuất hiện. 5 trainer phải phối hợp. Chỉ cần 1 người sai là cả đội bị Boss phản công.”
 
-Formula đề xuất:
+Boss là một **rare encounter**, không phải mode giáo viên spam liên tục.
 
-```ts
-baseXp = Math.min(25, Math.max(0, auraAmount) * 5)
-```
+Một Boss có HP rất lớn và tồn tại qua nhiều lesson cho đến khi bị tiêu diệt.
 
-Chỉ áp dụng nếu event source là Solo/classroom answer.
+---
 
-Không được tự cấp XP vì:
+# 5. RANDOM MODAL — THÊM TAB BOSS
 
-- giáo viên chỉnh điểm profile,
-- mua/bán,
-- import data,
-- admin correction.
-
-### Battle
-
-- Battle winner: `+20 XP` bonus.
-- Battle loser nhưng score > 0: `+10 XP` participation bonus.
-- Battle hòa và score > 0: mỗi bên `+12 XP`.
-
-Battle XP độc lập với Hào Quang nhưng không gây HP damage thêm.
-
-### Homework
-
-- hoàn thành homework: `+15 XP` cho active Pokémon.
-
-### Negative result
-
-- không trừ XP.
-- HP đã chịu punishment.
-
-## 7.3. Level curve
+Hiện tại:
 
 ```ts
-xpNeededForNextLevel(level) = Math.min(150, 30 + (level - 1) * 5)
+type RandomMode = 'solo' | 'battle'
 ```
 
-- Level bắt đầu từ 1.
-- XP overflow phải carry sang level tiếp theo.
-- Một event có thể level up nhiều lần nếu XP đủ.
+Đổi thành:
+
+```ts
+type RandomMode = 'solo' | 'battle' | 'boss'
+```
+
+Random modal có 3 tab:
+
+- 👤 Solo
+- ⚔️ Battle
+- 👹 Boss
+
+### Boss tab khi Boss chưa xuất hiện
+
+Không cho giáo viên force Boss tùy ý.
+
+Hiển thị dạng preview:
+
+```text
+👹 BOSS ĐANG ẨN NẤP
+
+Boss vẫn đang ở đâu đó...
+Tiếp tục Random Solo/Battle để tìm Boss.
+
+Normal Random since last encounter: 7
+```
+
+Không cần hiển thị exact threshold để giữ yếu tố bất ngờ.
+
+### Boss tab khi encounter đã trigger
+
+Hiển thị Boss Battle UI và 5 học sinh vừa được random.
+
+---
+
+# 6. BOSS ENCOUNTER SYSTEM
+
+Boss không được xuất hiện ở mọi lần Random.
+
+## 6.1. Per-class Boss state
+
+Boss state phải lưu **theo class**, không dùng chung toàn app.
 
 Ví dụ:
 
 ```ts
-while (xp >= neededXp) {
-  xp -= neededXp;
-  level += 1;
+export interface ClassBossState {
+  className: string;
+  boss: BossInstance;
+  randomsSinceLastEncounter: number;
+  nextEncounterAt: number;
+  encounterReady: boolean;
+  contributionByStudentId: Record<string, BossContribution>;
+  participantQueue: string[];
+  defeatedBosses: number;
+  updatedAt: number;
 }
 ```
 
-## 7.4. Max normal level
+## 6.2. Pre-rolled encounter threshold
 
-- Normal progression tới Level 30.
-- Sau Level 30, XP chuyển sang Mastery system ở phase sau.
+Không dùng pure `% chance` vì có thể Boss xuất hiện quá sớm hoặc quá lâu không xuất hiện.
+
+Mỗi lần Boss encounter kết thúc, pre-roll lượt xuất hiện tiếp theo:
+
+```ts
+const BOSS_MIN_RANDOM_GAP = 8;
+const BOSS_MAX_RANDOM_GAP = 14;
+```
+
+Ví dụ:
+
+```ts
+nextEncounterAt = randomIntInclusive(8, 14)
+```
+
+Sau mỗi **resolved Solo hoặc Battle**:
+
+```ts
+randomsSinceLastEncounter += 1
+```
+
+Khi:
+
+```ts
+randomsSinceLastEncounter >= nextEncounterAt
+```
+
+thì **lần bấm Random kế tiếp** phải mở Boss mode thay vì Solo/Battle.
+
+Sau khi Boss round được resolve:
+
+```ts
+randomsSinceLastEncounter = 0
+nextEncounterAt = randomIntInclusive(8, 14)
+encounterReady = false
+```
+
+### Quan trọng
+
+Không tăng counter khi:
+
+- giáo viên mở Random rồi đóng mà chưa resolve.
+- mở profile.
+- mở Shop.
+- Lucky Wheel.
+- Homework Check.
+- Attendance Check.
+
+Chỉ tính lượt Random thực sự hoàn tất.
 
 ---
 
-# 8. Evolution 2.0
+# 7. ACTIVE BOSS LIFECYCLE
 
-Hiện evolution đang dựa trên `points / 200`.
+Mỗi class có **1 Boss active tại một thời điểm**.
 
-Sau khi migrate, evolution phải dựa trên Pokémon Level.
+Boss không biến mất sau một lesson.
 
-## 8.1. Evolution stages
+Boss state persist qua:
 
-Có 5 stage hiện hữu trong `POKEMON_EVOLUTION_CHAINS`.
+- refresh.
+- logout/login.
+- chuyển class.
+- mở app ở thiết bị khác sau sync.
 
-Dùng threshold:
-
-| Stage | Level |
-|---|---:|
-| Stage 0 | 1–4 |
-| Stage 1 | 5–11 |
-| Stage 2 | 12–19 |
-| Stage 3 | 20–29 |
-| Stage 4 | 30+ |
-
-Tạo:
+Ví dụ Boss mặc định:
 
 ```ts
-getEvolutionStageForLevel(level: number): number
+export interface BossDefinition {
+  id: string;
+  name: string;
+  image?: string;
+  icon: string;
+  maxHp: number;
+  failDamage: number;
+  damagePerSuccessfulStudent: number;
+  tier: 'standard' | 'elite' | 'legendary';
+}
 ```
 
-## 8.2. Evolution variant phải deterministic
-
-`getEvolvedForm()` hiện dùng `Math.random()` khi chọn option trong một stage.
-
-Điều này có thể khiến form thay đổi không ổn định.
-
-Sửa thành deterministic bằng `instanceId`:
+Suggested presets:
 
 ```ts
-variantIndex = stableHash(`${instanceId}-${stageIndex}`) % options.length
+const BOSS_PRESETS: BossDefinition[] = [
+  {
+    id: 'shadow-dragon',
+    name: 'Shadow Dragon',
+    icon: '🐲',
+    maxHp: 500,
+    failDamage: 10,
+    damagePerSuccessfulStudent: 5,
+    tier: 'standard'
+  },
+  {
+    id: 'ancient-tyrant',
+    name: 'Ancient Tyrant',
+    icon: '👹',
+    maxHp: 750,
+    failDamage: 12,
+    damagePerSuccessfulStudent: 5,
+    tier: 'elite'
+  },
+  {
+    id: 'void-emperor',
+    name: 'Void Emperor',
+    icon: '🌌',
+    maxHp: 1000,
+    failDamage: 15,
+    damagePerSuccessfulStudent: 5,
+    tier: 'legendary'
+  }
+];
 ```
 
-Không random lại mỗi lần render/update.
+Initial implementation chỉ cần 1 Boss mặc định cũng được.
 
-## 8.3. Khi evolution xảy ra
-
-- giữ `instanceId`.
-- giữ `hp`.
-- giữ `xp`.
-- giữ `level`.
-- giữ `bond`.
-- giữ `charge`.
-- giữ `skills` và `skillUses`.
-- giữ shiny status.
-- giữ nickname.
-- cập nhật `dexId`, `speciesName`, `types`.
-
-Hiện modal evolution có thể được tái sử dụng nhưng nên rút gọn để không cản giờ học.
-
-Nếu evolution xảy ra trong Random:
-
-- hiện overlay/toast lớn ~1.5–2 giây.
-- không yêu cầu giáo viên bấm “OK” mới tiếp tục nếu có thể.
+**Không bắt buộc tạo artwork mới trong Milestone 1.** Có thể dùng icon + CSS trước.
 
 ---
 
-# 9. Bond System — PHASE 1
+# 8. BOSS HP
 
-Mỗi Pokémon có `bond` từ 0–100.
-
-Bond thể hiện mức độ gắn bó Trainer ↔ Pokémon.
-
-## Bond gain
-
-- Positive Solo result: `+1 Bond`.
-- Battle win: `+2 Bond`.
-- Battle loss nhưng score > 0: `+1 Bond`.
-- Homework complete: `+2 Bond`.
-- Level up: `+1 Bond`.
-- Evolution: `+3 Bond`.
-
-Bond không giảm.
-
-Clamp:
+Boss instance:
 
 ```ts
-bond = Math.min(100, bond + delta)
+export interface BossInstance {
+  instanceId: string;
+  definitionId: string;
+  name: string;
+  maxHp: number;
+  currentHp: number;
+  failDamage: number;
+  damagePerSuccessfulStudent: number;
+  spawnedAt: number;
+  defeatedAt?: number;
+}
 ```
 
-## Bond milestones
+Default Standard Boss:
 
-- 25 → Passive Lv.1 visual upgrade.
-- 60 → Passive Lv.2.
-- 100 → Best Friend badge + Passive Lv.3/cosmetic aura.
+```text
+Max HP = 500
+Party size = 5
+Damage/student = 5
+Successful round damage = 25
+```
 
-Không mở modal blocking ở mỗi milestone.
+Do đó cần khoảng:
 
-Chỉ dùng toast ngắn:
+```text
+500 / 25 = 20 successful Boss encounters
+```
 
-> ❤️ Bond 60! Passive upgraded!
+Boss phải là mục tiêu kéo dài qua nhiều lesson.
+
+Không reset HP khi kết thúc lesson.
 
 ---
 
-# 10. Answer Streak — FULLY AUTOMATIC
+# 9. RANDOM 5 TRAINERS FOR BOSS
 
-Đây là streak ưu tiên vì không cần thêm thao tác.
+## 9.1. Eligibility
 
-## Rule
+Một trainer đủ điều kiện vào Boss party khi:
 
-Chỉ tính những lần chấm trong Random Solo.
+```ts
+!student.isAbsent
+&& student.attendanceStatus !== 'absent'
+&& !!student.pet
+&& (student.pet.hp ?? 0) > 0
+```
 
-- Solo positive `> 0` → `answerStreak + 1`.
-- Solo `<= 0` → reset `answerStreak = 0`.
-- Manual adjustment không ảnh hưởng.
-- Lucky Wheel không ảnh hưởng.
-- Battle không ảnh hưởng Answer Streak.
+Lý do phải có active Pokémon:
 
-## Milestones
+- Boss failure gây HP damage.
+- Trainer không có Pokémon sẽ không chịu cùng mức risk với các bạn khác.
 
-- x3 → +5 bonus Pokémon XP.
-- x5 → +10 bonus Pokémon XP.
-- x10 → +20 bonus Pokémon XP.
-- mỗi 5 sau x10 → +10 XP.
+## 9.2. Phải đủ 5 trainer
 
-Không cộng Hào Quang từ streak.
+Nếu class hiện có < 5 trainer eligible:
 
-Không ảnh hưởng điểm học tập/fairness.
+- Không consume Boss encounter.
+- Không reset counter.
+- Hiện message:
+
+```text
+Boss đã xuất hiện nhưng cần ít nhất 5 trainer đang có Pokémon để chiến đấu.
+```
+
+Boss encounter vẫn ở trạng thái ready cho lần sau.
+
+## 9.3. Fair Boss Queue
+
+Không dùng hoàn toàn random mỗi lần vì có thể một số học sinh liên tục bị chọn và dễ thống trị contribution leaderboard.
+
+Tạo queue riêng:
+
+```ts
+bossParticipantQueueByClass: Record<string, string[]>
+```
+
+Nguyên tắc:
+
+1. Queue chứa tất cả eligible trainer IDs theo thứ tự shuffle.
+2. Mỗi Boss encounter lấy 5 ID đầu.
+3. Remove 5 ID đó khỏi queue.
+4. Khi queue còn < 5:
+   - tạo cycle mới bằng cách shuffle toàn bộ eligible trainer.
+   - tránh chọn lại ngay các trainer ở party trước nếu đủ số lượng học sinh.
+
+Mục tiêu:
+
+> Random nhưng gần như mọi học sinh đều có cơ hội tương đương.
+
+---
+
+# 10. BOSS ROUND UI
+
+Khi Boss xuất hiện, modal phải rõ nhưng nhanh.
+
+Suggested layout:
+
+```text
+                 👹 SHADOW DRAGON
+                HP 375 / 500
+          ███████████████░░░░░
+
+   [Trainer 1] [Trainer 2] [Trainer 3] [Trainer 4] [Trainer 5]
+   Pokémon      Pokémon      Pokémon      Pokémon      Pokémon
+   HP 72        HP 48        HP 96        HP 31        HP 84
+
+          CẢ 5 TRAINER PHẢI TRẢ LỜI ĐÚNG
+
+   ✅ CẢ 5 ĐỀU ĐÚNG          ❌ CÓ ÍT NHẤT 1 BẠN SAI
+```
+
+Không bắt giáo viên nhập điểm cho từng học sinh.
+
+Không bắt click từng học sinh đúng/sai.
+
+Chỉ có **2 nút resolve chính**.
+
+### Success
+
+```text
+✅ CẢ 5 ĐỀU ĐÚNG
+```
+
+### Failure
+
+```text
+❌ CÓ ÍT NHẤT 1 BẠN SAI
+```
+
+Đây là workflow nhanh nhất và đúng yêu cầu:
+
+> Chỉ cần 1 trong 5 trả lời sai thì cả đội thất bại.
+
+---
+
+# 11. BOSS ROUND — SUCCESS RULE
+
+Khi giáo viên bấm:
+
+```text
+✅ CẢ 5 ĐỀU ĐÚNG
+```
+
+## 11.1. Học sinh
+
+Mỗi trong 5 trainer:
+
+```text
++5 Hào Quang
+```
+
+Phải đi qua shared Aura update logic để giữ đúng cơ chế hiện tại:
+
+```text
++5 Aura → active Pokémon +5 HP
+```
+
+Không bypass HP healing.
+
+History:
+
+```text
+👹 Boss Raid thành công: +5 Hào Quang
+```
+
+## 11.2. Boss damage
+
+Mỗi trainer đóng góp:
+
+```ts
+damagePerSuccessfulStudent = 5
+```
+
+Party 5 người:
+
+```ts
+roundDamage = 5 * 5 = 25
+```
+
+Boss:
+
+```ts
+boss.currentHp = Math.max(0, boss.currentHp - 25)
+```
+
+UI animation/toast:
+
+```text
+💥 PERFECT TEAM ATTACK!
+Shadow Dragon -25 HP
+
+Minh +5 Hào Quang
+Lan +5 Hào Quang
+...
+```
+
+Animation tối đa khoảng 1–1.5 giây và không block lâu.
+
+---
+
+# 12. BOSS ROUND — FAILURE RULE
+
+Khi giáo viên bấm:
+
+```text
+❌ CÓ ÍT NHẤT 1 BẠN SAI
+```
+
+## 12.1. Không trừ Hào Quang
+
+Failure **không trừ Hào Quang**.
+
+Boss trực tiếp gây damage Pokémon.
+
+Ví dụ Standard Boss:
+
+```ts
+failDamage = 10
+```
+
+Mỗi trong 5 active Pokémon:
+
+```text
+-10 HP
+```
+
+History:
+
+```text
+👹 Boss phản công: Pokémon -10 HP
+```
+
+Boss không mất HP.
+
+## 12.2. Không giảm XP/Bond/Streak
+
+Không punishment stacking.
+
+Failure chỉ gây:
+
+- Pokémon HP damage.
+
+Không gây:
+
+- Aura penalty.
+- Pokémon XP loss.
+- Bond loss.
+- Trainer XP loss.
+- Homework Streak reset.
+
+---
+
+# 13. MULTIPLE POKÉMON DEATHS IN ONE BOSS ROUND
+
+Đây là edge case bắt buộc xử lý.
+
+Boss failure có thể làm **nhiều Pokémon cùng về 0 HP**.
+
+Code hiện tại dùng một `pokemonReleaseEvent`.
+
+Boss cần hỗ trợ queue:
+
+```ts
+const [pokemonReleaseQueue, setPokemonReleaseQueue] = useState<PokemonReleaseEvent[]>([])
+```
+
+Flow:
+
+1. Apply Boss damage cho cả 5.
+2. Thu tất cả `releaseEvent`.
+3. Push vào queue.
+4. Hiển thị release modal cho event đầu tiên.
+5. Học sinh chọn Pokémon khác / mua trứng / đóng theo flow hiện tại.
+6. Sau khi xử lý event đó → pop queue → hiện event tiếp theo.
+7. Chỉ khi queue hết mới quay lại normal Random flow.
+
+Không được bỏ mất event nếu 2–5 Pokémon chết cùng lúc.
+
+---
+
+# 14. BOSS CONTRIBUTION SYSTEM
+
+Cần xác định chính xác Top 5 người có công nhất khi Boss chết.
+
+```ts
+export interface BossContribution {
+  studentId: string;
+  successfulRounds: number;
+  damageDealt: number;
+  appearances: number;
+  failedRounds: number;
+  firstContributionAt?: number;
+  lastContributionAt?: number;
+}
+```
+
+## 14.1. Khi student xuất hiện trong Boss party
+
+```ts
+appearances += 1
+```
+
+## 14.2. Success
+
+Mỗi người:
+
+```ts
+successfulRounds += 1
+damageDealt += boss.damagePerSuccessfulStudent // default 5
+```
+
+## 14.3. Failure
+
+Mỗi người:
+
+```ts
+failedRounds += 1
+```
+
+Không cộng damage.
+
+## 14.4. Top 5 ranking
+
+Sort:
+
+1. `damageDealt DESC`
+2. `successfulRounds DESC`
+3. `appearances ASC` — cùng damage nhưng làm được với ít lượt hơn thì ưu tiên.
+4. `firstContributionAt ASC`
+5. `studentId ASC` deterministic fallback.
+
+UI Boss tab có thể hiển thị compact leaderboard:
+
+```text
+🏆 TOP CONTRIBUTORS
+1. Minh      45 DMG
+2. Lan       40 DMG
+3. Huy       35 DMG
+4. An        35 DMG
+5. Phương    30 DMG
+```
+
+Không cần mở leaderboard riêng trong lesson.
+
+---
+
+# 15. BOSS DEFEATED FLOW
+
+Khi:
+
+```ts
+boss.currentHp <= 0
+```
+
+Không random Boss mới ngay lập tức.
+
+Hiện Boss Defeated modal:
+
+```text
+🏆 BOSS DEFEATED!
+
+Shadow Dragon đã bị đánh bại!
+
+TOP 5 CONTRIBUTORS
+🥇 Minh — 45 DMG
+🥈 Lan — 40 DMG
+🥉 Huy — 35 DMG
+4. An — 35 DMG
+5. Phương — 30 DMG
+
+Mỗi trainer Top 5 nhận:
+✨ +5 Hào Quang
+🥚 1 Legendary Egg
+```
+
+## 15.1. Reward Top 5
+
+Mỗi Top 5:
+
+```text
++5 Hào Quang
++1 Legendary Egg
+```
+
+`+5 Hào Quang` phải dùng shared point update logic:
+
+```text
++5 Aura → +5 HP active Pokémon
+```
+
+Nếu trainer vừa mất Pokémon ở round cuối và hiện chưa có active Pokémon:
+
+- vẫn nhận +5 Aura.
+- không có pet thì không heal HP.
+- vẫn nhận Legendary Egg.
+
+## 15.2. Không reward party cuối cùng riêng biệt ngoài normal success
+
+Nếu round cuối thành công:
+
+- 5 trainer của round đó vẫn nhận normal `+5 Aura` từ success.
+- Sau khi Boss chết, nếu họ nằm trong Top 5 contribution thì nhận thêm Boss Kill Reward `+5 Aura + Legendary Egg`.
+
+Điều này là intentional.
+
+History phải ghi tách:
+
+```text
+👹 Boss Raid thành công: +5 Hào Quang
+🏆 Top 5 Boss Contributor: +5 Hào Quang + Legendary Egg
+```
+
+---
+
+# 16. LEGENDARY EGG
+
+Boss reward yêu cầu một loại trứng mới.
+
+Hiện tại:
+
+```ts
+kind?: 'normal' | 'special'
+```
+
+Đổi thành:
+
+```ts
+export type EggKind = 'normal' | 'special' | 'legendary'
+```
+
+```ts
+export interface StudentEgg {
+  instanceId?: string;
+  progress: number;
+  status: 'egg' | 'hatched';
+  assignedDexId: number;
+  kind?: EggKind;
+  requiredProgress?: number;
+  acquiredAt?: number;
+  source?: 'shop' | 'boss' | 'reward' | 'system';
+}
+```
+
+Legendary Egg:
+
+```text
+Cost = không bán trong Shop ở Milestone đầu.
+Required progress = 30 Hào Quang.
+Source chính = Top 5 Boss Contributor.
+```
+
+Không cho `getEggCost('legendary')` dùng trong Shop ở phase này.
+
+---
+
+# 17. LEGENDARY POKÉMON POOL
+
+Không dùng toàn bộ normal pool.
+
+Tạo constant riêng:
+
+```ts
+export const LEGENDARY_POKEMON_DEX_IDS = new Set<number>([
+  // curated legendary / mythical pool
+]);
+```
+
+Có thể bắt đầu bằng subset từ `SPECIAL_POKEMON_DEX_IDS` hiện tại.
+
+Legendary Egg phải:
+
+1. Pre-roll `assignedDexId` khi egg được tạo/reward.
+2. Không reroll khi reload.
+3. Backup/import giữ nguyên Pokémon đã pre-roll.
+
+Suggested:
+
+```ts
+const createLegendaryEgg = (): StudentEgg => ({
+  instanceId: createInstanceId(),
+  progress: 0,
+  status: 'egg',
+  assignedDexId: getRandomLegendaryPokemonDexId(),
+  kind: 'legendary',
+  requiredProgress: 30,
+  acquiredAt: Date.now(),
+  source: 'boss'
+});
+```
+
+---
+
+# 18. EGG INVENTORY — BẮT BUỘC CHO BOSS REWARD
+
+Code hiện tại chỉ có:
+
+```ts
+student.egg?: StudentEgg
+```
+
+Không được overwrite quả trứng đang ấp khi trainer nhận Legendary Egg.
+
+Thêm:
+
+```ts
+export interface Student {
+  ...
+  egg?: StudentEgg;        // egg đang active/incubating
+  eggInventory?: StudentEgg[]; // egg chưa đưa vào incubator
+}
+```
+
+## Reward rule
+
+Boss reward luôn:
+
+```ts
+student.eggInventory.push(createLegendaryEgg())
+```
+
+Không tự replace:
+
+- active Pokémon.
+- active egg.
 
 ## UI
 
-Trong Random Solo hiển thị nhỏ:
+Trong Pet/Profile tab thêm section nhỏ:
 
-> 🔥 Answer Streak ×4
+```text
+🥚 EGG INVENTORY
 
-Nếu đạt milestone:
+Legendary Egg x2
+Special Egg x1
+```
 
-> 🔥 STREAK ×5 · +10 XP
+Nếu `student.egg` trống:
 
-Toast auto dismiss ~900ms.
+```text
+[ Bắt đầu ấp ]
+```
+
+Nếu đang ấp egg khác:
+
+```text
+Đang có một quả trứng trong incubator.
+Hoàn tất trứng hiện tại trước khi ấp quả khác.
+```
+
+Không cần hỗ trợ nhiều incubator.
 
 ---
 
-# 11. Battle Win Streak
+# 19. BOSS GAME EVENTS
 
-Tự động.
+Mở rộng `gameEvents.ts`.
 
-- thắng Battle → `battleWinStreak + 1`.
-- thua → reset 0.
-- hòa → giữ nguyên hoặc reset; dùng rule đơn giản: reset 0.
+```ts
+export type GameEventType =
+  | ...existing
+  | 'BOSS_ROUND_SUCCESS'
+  | 'BOSS_ROUND_FAILURE'
+  | 'BOSS_DEFEATED'
+  | 'BOSS_TOP_CONTRIBUTOR_REWARD';
+```
 
-Milestones:
+Source:
 
-- x2 → +5 XP.
-- x3 → +10 XP.
-- x5 → +20 XP.
+```ts
+export type GameEventSource =
+  | ...existing
+  | 'boss';
+```
+
+Tuy nhiên Boss HP/state nên nằm trong `bossSystem.ts`, không nhồi toàn bộ vào `applyGameEventToStudent`.
+
+---
+
+# 20. NEW MODULE: `bossSystem.ts`
+
+Tạo module riêng, pure functions càng nhiều càng tốt.
+
+Suggested API:
+
+```ts
+export const createBossInstance = (...): BossInstance
+
+export const createClassBossState = (...): ClassBossState
+
+export const rollNextBossEncounterGap = (): number
+
+export const incrementBossEncounterCounter = (
+  state: ClassBossState
+): ClassBossState
+
+export const isBossEncounterReady = (
+  state: ClassBossState
+): boolean
+
+export const selectBossParty = (
+  students: Student[],
+  queue: string[],
+  previousPartyIds?: string[]
+): {
+  party: Student[];
+  nextQueue: string[];
+}
+
+export const resolveBossSuccess = (
+  state: ClassBossState,
+  studentIds: string[],
+  timestamp: number
+): BossRoundResolution
+
+export const resolveBossFailure = (
+  state: ClassBossState,
+  studentIds: string[],
+  timestamp: number
+): BossRoundResolution
+
+export const getBossTopContributors = (
+  state: ClassBossState,
+  limit?: number
+): BossContribution[]
+```
+
+`bossSystem.ts` không trực tiếp gọi React state setter.
+
+---
+
+# 21. BOSS STATE PERSISTENCE
+
+Không chỉ giữ Boss state trong component state.
+
+Nó phải nằm trong snapshot data được Supabase/local persistence lưu cùng app.
+
+Suggested root data addition:
+
+```ts
+bossStatesByClass?: Record<string, ClassBossState>
+```
+
+Nếu app hiện snapshot chỉ lưu students/config, mở rộng schema serializer/deserializer tương ứng.
+
+## Migration
+
+Nếu old data không có boss state:
+
+```ts
+bossStatesByClass = {}
+```
+
+Khi class lần đầu dùng Random:
+
+```ts
+ensureClassBossState(className)
+```
+
+Không migrate toàn bộ class ngay khi app boot nếu không cần.
+
+---
+
+# 22. BOSS UI COMPONENTS
+
+Không tiếp tục làm `App.tsx` phình quá mức.
+
+Tạo:
+
+### `components/BossBattlePanel.tsx`
+
+Props concept:
+
+```ts
+interface BossBattlePanelProps {
+  boss: BossInstance;
+  party: Student[];
+  topContributors: BossContributionView[];
+  onSuccess: () => void;
+  onFailure: () => void;
+  resolving?: boolean;
+}
+```
+
+### `components/BossHpBar.tsx`
+
+- Boss name.
+- current/max HP.
+- % bar.
+- danger animation khi HP thấp.
+
+### `components/BossDefeatedModal.tsx`
+
+- Boss defeated.
+- Top 5.
+- reward summary.
+
+### Optional later
+
+`components/BossPreview.tsx`
+
+---
+
+# 23. RANDOM HANDLER REFACTOR
+
+Hiện:
+
+```ts
+const handleRandom = (forceMode?: 'solo' | 'battle') => {...}
+```
+
+Refactor thành:
+
+```ts
+const handleRandom = (forceMode?: RandomMode) => {
+  // 1. determine if boss encounter must take priority
+  // 2. if boss ready and enough eligible students -> boss
+  // 3. otherwise forceMode or normal Solo/Battle logic
+}
+```
+
+Priority:
+
+```text
+Boss encounter ready
+    ↓
+Boss has >=5 eligible trainers?
+    YES → Boss
+    NO  → keep encounter ready, fallback Solo/Battle
+
+No Boss ready
+    ↓
+forceMode if valid
+    ↓
+otherwise 50/50 Solo/Battle as current
+```
+
+### Boss must not be bypassed forever
+
+Nếu Boss encounter ready và đủ 5 eligible trainers:
+
+- Normal Random button must open Boss.
+- Teacher không được spam Solo/Battle force buttons để né Boss.
+
+Sau khi Boss round resolve mới quay lại Solo/Battle.
+
+---
+
+# 24. PREVENT DOUBLE RESOLVE
+
+Boss buttons phải lock ngay sau click:
+
+```ts
+bossRoundResolving = true
+```
+
+Prevent:
+
+- double click Success.
+- Success rồi Failure.
+- network sync khiến reward lặp.
+
+Tạo `roundId`:
+
+```ts
+interface ActiveBossRound {
+  roundId: string;
+  bossInstanceId: string;
+  partyStudentIds: string[];
+  openedAt: number;
+  resolvedAt?: number;
+  result?: 'success' | 'failure';
+}
+```
+
+Reward một `roundId` chỉ được apply một lần.
+
+Nếu app reload khi round chưa resolve:
+
+- có thể discard unresolved UI round.
+- không apply reward/damage.
+- Boss encounter vẫn ready.
+
+Nếu reload sau resolve:
+
+- state đã persist nên không reward lại.
+
+---
+
+# 25. BOSS SOUNDS / ANIMATIONS
+
+Giữ nhẹ.
+
+Boss encounter:
+
+- short 0.5–1 sec sound.
+- subtle shake/glow.
+
+Success:
+
+- hit animation.
+- boss HP bar giảm.
+
+Failure:
+
+- boss attack flash.
+- 5 Pokémon cards show `-N HP`.
+
+Boss death:
+
+- larger celebration modal.
+
+Không dùng animation kéo dài 5–10 giây.
+
+Không block teacher workflow quá lâu.
+
+---
+
+# 26. FEATURE: POKÉMON NATURE / PERSONALITY
+
+Sau Boss core, triển khai Nature.
+
+Mỗi Pokémon instance có một Nature cố định.
+
+```ts
+export type PokemonNatureId =
+  | 'brave'
+  | 'curious'
+  | 'loyal'
+  | 'hardworking'
+  | 'lucky'
+  | 'energetic'
+  | 'calm';
+```
+
+Thêm:
+
+```ts
+PokemonPet.natureId?: PokemonNatureId
+```
+
+Nature được roll khi Pokémon được tạo/hatch/acquire.
+
+Existing Pokémon migration:
+
+- deterministic roll từ `instanceId` bằng stable hash.
+- không random lại mỗi load.
+
+Suggested effects:
+
+### Brave
+
+```text
+Battle Pokémon XP +10%
+```
+
+### Curious
+
+```text
+Expedition rare loot chance +10% relative bonus
+```
+
+### Loyal
+
+```text
+Bond gain +20%
+```
+
+### Hardworking
+
+```text
+Homework XP +15%
+```
+
+### Lucky
+
+```text
+Instant Drop chance +2 percentage points
+```
+
+### Energetic
+
+```text
+20% chance extra +1 Charge on positive Solo
+```
+
+### Calm
+
+```text
+Positive HP recovery effects +10%, rounded down/min 1
+```
+
+Nature không cộng Hào Quang trực tiếp.
+
+---
+
+# 27. FEATURE: TRAINER LEVEL
+
+Thêm progression dài hạn cho student, tách khỏi Rank/Hào Quang.
+
+```ts
+export interface TrainerProgress {
+  level: number;
+  xp: number;
+  totalXp: number;
+  titleId?: string;
+  unlockedTitleIds?: string[];
+}
+```
+
+Thêm vào Student:
+
+```ts
+trainerProgress?: TrainerProgress
+```
+
+Trainer XP không bị mất khi bị trừ Hào Quang.
+
+Suggested Trainer XP sources:
+
+```text
+Attendance present        +5 XP
+Homework complete         +10 XP
+Positive Solo             +5 XP
+Battle win                +10 XP
+Boss success participation +10 XP
+Boss defeated Top 5       +25 XP
+Pokémon evolution         +15 XP
+Gym Badge earned          +20 XP
+```
+
+Không cần Trainer XP popup lớn mỗi lần.
+
+Hiển thị compact trong profile/student card/random modal.
+
+---
+
+# 28. FEATURE: TRAINER TITLES
+
+Unlock theo milestone.
+
+Ví dụ:
+
+```text
+🌱 Rookie Trainer
+📚 Homework Master
+⚔️ Battle Specialist
+💖 Pokémon Friend
+✨ Shiny Hunter
+🐣 Pokémon Breeder
+👹 Boss Hunter
+🏆 Boss Slayer
+👑 Pokémon Champion
+```
+
+Học sinh chọn 1 title đang equip.
+
+Random UI:
+
+```text
+Minh Anh
+👹 Boss Hunter
+Pikachu Lv.24
+```
+
+Title chủ yếu cosmetic.
 
 Không cộng Hào Quang.
 
 ---
 
-# 12. Pokémon Charge — PHASE 1
+# 29. FEATURE: GYM BADGES
 
-Mỗi Pokémon có thanh:
-
-> ⚡ Charge ●●●○○
-
-Range `0..5`.
-
-## Charge gain
-
-- Positive Solo → +1.
-- Battle win → +2.
-- Battle participation with score > 0 → +1.
-
-## Khi Charge = 5
-
-Không cần học sinh bấm.
-
-Ở positive classroom event tiếp theo:
-
-- tự kích hoạt `POWER READY`.
-- bonus `+50% XP` cho event đó.
-- Charge reset về 0.
-
-Không nhân Hào Quang.
-
-Không ảnh hưởng HP.
-
-Animation khoảng 800–1200ms.
-
----
-
-# 13. Passive Ability System — PHASE 1
-
-Mỗi Pokémon có 1 Passive Ability tự động.
-
-Passive **không được yêu cầu giáo viên bấm**.
-
-Passive không nên thay đổi Hào Quang trực tiếp để tránh balance học tập.
-
-Passive chỉ tác động tới:
-
-- XP.
-- Bond.
-- Charge.
-- drop chance.
-- cosmetic/reaction.
-- rất ít HP bonus nếu hợp lý.
-
-## 13.1. Mapping ban đầu
-
-Dựa trên `baseDexId` để evolution vẫn giữ cùng passive family.
-
-### Pikachu — Static Charge
-
-- Mỗi positive Solo thứ 3: +5 bonus XP.
-- Bond Lv.2: +8 XP.
-- Bond 100: +10 XP.
-
-### Bulbasaur / Chikorita / Treecko / Leafeon — Growth
-
-- Homework complete: +20% homework XP.
-- Higher Bond: +30%, sau đó +40%.
-
-### Charmander / Cyndaquil / Torchic — Blaze
-
-- Khi Answer Streak >= 3: +20% Solo XP.
-- Bond upgrades tăng 25% / 30%.
-
-### Squirtle / Psyduck / Mudkip / Totodile — Torrent
-
-- Battle thua nhưng score > 0: +5 bonus XP và +1 Bond.
-- Bond upgrades tăng bonus.
-
-### Eevee / Ditto — Adaptability
-
-- Mọi Bond gain +1 extra mỗi event, cap hợp lý.
-
-### Jigglypuff / Togepi — Joyful Heart
-
-- Mỗi Homework Streak milestone: bonus Bond.
-- Trước khi Homework system hoàn thành, passive chỉ cần hook sẵn.
-
-### Snorlax — Rest & Recover
-
-- Positive Solo event hồi thêm +1 HP ngoài generic Aura healing.
-- Không vượt 100.
-
-### Lucario — Aura Fighter
-
-- Battle win XP +25%.
-
-### Greninja — Ninja Focus
-
-- Khi Answer Streak >= 2, mỗi positive Solo có 20% chance thêm +1 Charge.
-- Nếu muốn tránh RNG, dùng deterministic every 3rd positive Solo.
-
-### Gengar — Mischief
-
-- Random Drop chance x2 khi Drop System được bật.
-- Trước Phase Drop, passive hiển thị nhưng chưa cần effect hoặc dùng +5 XP mỗi 5 positive events.
-
-### Mew — Synchronize
-
-- Mỗi level up +2 extra Bond.
-
-### Rayquaza — Sky Legend
-
-- +10% Pokémon XP từ classroom events.
-
-## 13.2. Passive resolver
-
-Không viết `if/else` rải khắp `App.tsx`.
-
-Tạo config object + resolver.
-
-Ví dụ:
+Achievement system nhưng theme Pokémon.
 
 ```ts
-interface PassiveContext {
-  student: Student;
-  pet: PokemonPet;
-  event: GameEvent;
-  baseXp: number;
-  baseBond: number;
-}
-
-interface PassiveResult {
-  bonusXp?: number;
-  bonusBond?: number;
-  bonusCharge?: number;
-  bonusHp?: number;
-  reaction?: string;
+export interface EarnedBadge {
+  badgeId: string;
+  earnedAt: number;
 }
 ```
 
----
-
-# 14. Event Engine
-
-Đây là phần quan trọng để tránh bugs.
-
-## 14.1. Event context
-
-Không suy luận event từ `reason` string.
-
-Mở rộng handler để truyền source rõ ràng.
-
-Ví dụ:
+Student:
 
 ```ts
-interface GameEvent {
-  type: GameEventType;
-  source:
-    | 'solo'
-    | 'battle'
-    | 'manual'
-    | 'skill'
-    | 'lucky-wheel'
-    | 'homework'
-    | 'system';
+earnedBadges?: EarnedBadge[]
+```
 
-  studentId: string;
-  auraDelta?: number;
-  battleOutcome?: 'win' | 'loss' | 'draw';
-  battleScore?: number;
+Suggested badges:
+
+### 🔥 Blaze Badge
+
+```text
+Best Answer Streak >= 10
+```
+
+### 📚 Scholar Badge
+
+```text
+Best Homework Streak >= 10
+```
+
+### ⚔️ Battle Badge
+
+```text
+Battle Wins >= 10
+```
+
+### 💖 Friendship Badge
+
+```text
+Any active/owned Pokémon Bond = 100
+```
+
+### ✨ Shiny Hunter Badge
+
+```text
+Own at least one Shiny Pokémon
+```
+
+### 🐣 Breeder Badge
+
+```text
+Hatch 10 eggs
+```
+
+### 🌟 Master Badge
+
+```text
+Any Pokémon Mastery = 5 stars
+```
+
+### 👹 Raid Badge
+
+```text
+Participate in 10 successful Boss rounds
+```
+
+### 🏆 Boss Slayer Badge
+
+```text
+Finish Top 5 contribution on a defeated Boss
+```
+
+Badge detection phải automatic từ event/state.
+
+---
+
+# 30. FEATURE: POKÉMON EXPEDITION
+
+## Goal
+
+Tạo cảm giác Pokémon tiếp tục “sống” giữa hai buổi học.
+
+Không dùng real-time polling/background job.
+
+Dùng timestamp calculation khi app/class được mở lại.
+
+```ts
+export interface PokemonExpedition {
+  expeditionId: string;
+  petInstanceId: string;
+  startedAt: number;
+  resolvesAt: number;
+  status: 'active' | 'ready' | 'claimed';
+  seed: string;
+}
+```
+
+### Start
+
+Có thể auto-start khi lesson/session kết thúc hoặc teacher click End Lesson nếu app đã có session concept sau này.
+
+Phase đầu có thể đơn giản:
+
+- Khi Attendance lessonKey thay đổi / lesson mới được xác định.
+- Pokémon active của trainer đủ điều kiện được tạo Expedition mới nếu chưa có active expedition.
+
+### Resolve
+
+Khi app mở sau `resolvesAt`:
+
+- deterministic result từ seed.
+- không cần server cron.
+
+Rewards nhỏ:
+
+- Pokémon XP.
+- Bond.
+- Rare Candy style instant effect.
+- Egg Fragment.
+
+Homework/attendance/bond có thể boost loot.
+
+Không cộng Hào Quang trực tiếp ở phase đầu.
+
+---
+
+# 31. FEATURE: EGG FRAGMENTS + EGG TYPES
+
+Boss Legendary Egg đã tạo nền Egg Inventory.
+
+Sau đó có thể thêm:
+
+```ts
+export interface EggFragments {
+  normal?: number;
+  fire?: number;
+  water?: number;
+  grass?: number;
+  electric?: number;
+  special?: number;
+}
+```
+
+10 fragments → craft 1 egg tương ứng.
+
+Possible sources:
+
+- Expedition.
+- Weekly Chest.
+- Random Drop hiếm.
+- Streak milestones.
+
+Không thêm nhiều currency vào màn hình chính.
+
+Chỉ hiển thị trong Profile/Pet tab.
+
+---
+
+# 32. FEATURE: WEEKLY CHEST
+
+Không tạo quest phải giáo viên xác nhận.
+
+Mỗi student có progress tự động:
+
+```ts
+export interface WeeklyChestProgress {
+  weekKey: string;
+  progress: number; // 0..100
+  claimed: boolean;
+}
+```
+
+Suggested automatic contribution:
+
+```text
+Attendance present   +10
+Homework complete    +15
+Positive Solo        +3
+Battle participation +3
+Battle win           +5
+Boss success         +5
+```
+
+Clamp 100.
+
+Khi 100:
+
+```text
+🎁 WEEKLY CHEST READY
+```
+
+Reward không nên quá mạnh:
+
+- Pokémon XP.
+- Bond.
+- Egg fragments.
+- Rare Candy.
+- very small Shiny chance booster if desired later.
+
+Không reward Hào Quang trực tiếp mặc định.
+
+---
+
+# 33. FEATURE: ADVENTURE JOURNAL
+
+Mục tiêu: tăng emotional attachment.
+
+```ts
+export interface AdventureJournalEntry {
+  id: string;
   timestamp: number;
+  type:
+    | 'pokemon-hatched'
+    | 'pokemon-evolved'
+    | 'pokemon-lost'
+    | 'bond-max'
+    | 'mastery'
+    | 'shiny-acquired'
+    | 'boss-win'
+    | 'boss-top5'
+    | 'trainer-level'
+    | 'badge-earned';
+  text: string;
+  petInstanceId?: string;
+  metadata?: Record<string, string | number | boolean>;
 }
 ```
 
-## 14.2. Kết quả processor
+Không ghi mọi +XP nhỏ.
 
-```ts
-interface GameEventResult {
-  student: Student;
-  uiEvents: PokemonUiEvent[];
-  releaseEvent?: PokemonReleaseEvent;
-}
-```
-
-`uiEvents` có thể gồm:
-
-- XP gained.
-- level up.
-- bond up.
-- streak milestone.
-- passive triggered.
-- charge ready.
-- evolution.
-- random drop.
-
-UI chỉ consume event và hiện toast.
-
-Game logic không phụ thuộc UI.
-
----
-
-# 15. Refactor `handleUpdatePoints`
-
-Hiện function đang xử lý quá nhiều thứ:
-
-- rank.
-- history.
-- egg.
-- evolution.
-- HP.
-- release.
-
-Refactor cẩn thận, không thay behavior ngoài scope.
-
-## Tách rõ 2 loại Aura change
-
-### `applyRewardPenaltyAuraDelta(...)`
-
-Dùng cho:
-
-- Solo scoring.
-- manual reward/punishment.
-- skill reward/penalty nếu phù hợp.
-- Lucky Wheel points.
-
-Có HP coupling.
-
-### `spendAuraCurrency(...)`
-
-Dùng cho:
-
-- mua skill.
-- mua egg.
-
-Không đổi HP.
-
-Không được dùng generic `handleUpdatePoints(-cost)` cho purchase.
-
----
-
-# 16. Random Solo UI 2.0 — PHASE 2
-
-Không thay workflow Random hiện tại.
-
-Giáo viên vẫn:
-
-1. bấm Random Solo.
-2. học sinh trả lời.
-3. giáo viên chấm như hiện tại.
-
-## Trong modal Random hiển thị thêm
-
-Bên cạnh Pokémon:
-
-- species/nickname.
-- Level.
-- HP.
-- XP bar.
-- Bond.
-- Answer Streak.
-- Charge.
-- Passive icon/name ngắn.
+Chỉ ghi milestone đáng nhớ.
 
 Ví dụ:
 
 ```text
-Pikachu Lv. 8
-❤️ HP 74/100
-XP ███████░░ 52/70
-💖 Bond 43
-🔥 Streak ×4
-⚡ ●●●○○
-Static Charge
+12 Aug — Pikachu hatched.
+19 Aug — Pikachu evolved.
+26 Aug — First successful Boss Raid.
+10 Sep — Pikachu reached Bond 100.
+22 Sep — Pikachu was lost after reaching 0 HP.
+30 Sep — Trainer finished Top 5 against Shadow Dragon.
 ```
 
-## Sau khi giáo viên chấm
+Pokémon bị mất vẫn còn dấu vết trong Journal.
 
-Không mở modal phụ.
+---
 
-Hiện floating reaction ngay trong Random modal:
+# 34. FEATURE: POKÉMON DANGER STATE
+
+Không thay đổi mechanics, chỉ tăng visual feedback.
 
 ```text
-+15 XP
-❤️ +1 Bond
-🔥 Streak ×5
-⚡ Blaze activated!
+HP 51–100  Healthy
+HP 21–50   Injured
+HP 1–20    🚨 DANGER
 ```
 
-Tối đa 2–3 dòng quan trọng cùng lúc.
+Khi HP <= 20:
 
-Auto disappear 0.8–1.2 giây.
+- StudentCard/PokemonMiniStatus có warning nhẹ.
+- Boss party card làm HP danger nổi bật.
 
-Không chặn thao tác tiếp theo.
-
----
-
-# 17. Battle UI 2.0 — PHASE 2
-
-Giữ workflow và layout battle hiện tại.
-
-Mỗi side thêm:
-
-- Pokémon Level.
-- HP.
-- Bond nhỏ.
-- Battle streak.
-- passive badge.
-
-Sau `handleResolveBattle`:
-
-Ngoài result hiện tại, hiển thị ngắn:
-
-Winner:
-
-> 🏆 +20 XP · ❤️ +2 Bond · ⚡ +2 Charge
-
-Loser nếu score > 0:
-
-> 💪 +10 XP · ❤️ +1 Bond
-
-Nếu pet HP = 0:
-
-- release modal phải được ưu tiên hiển thị trên Battle result.
+Không modal riêng mỗi lần HP thấp.
 
 ---
 
-# 18. Release / Lose Pokémon Flow 2.0 — PHASE 2
+# 35. FEATURE: SUPPORT POKÉMON — LATER PHASE
 
-Nâng cấp modal hiện có, nhưng giữ luật mất Pokémon.
-
-## Modal state
+Sau khi Trainer Level ổn định:
 
 ```ts
-interface PokemonReleaseEvent {
+supportPetInstanceId?: string
+```
+
+Active Pokémon:
+
+- chịu HP damage.
+- xuất hiện trong Random.
+- dùng active skill.
+
+Support Pokémon:
+
+- không chịu damage.
+- cho passive bonus rất nhỏ.
+
+Ví dụ:
+
+```text
+Squirtle Support → Homework Pokémon XP +5%
+Eevee Support → Bond gain +5%
+Pikachu Support → Charge chance nhỏ
+```
+
+Không cộng Aura.
+
+Không implement trước Boss/Nature/Trainer Level.
+
+---
+
+# 36. FEATURE: POKÉMON SYNERGY — LATER PHASE
+
+Khi Active + Support match set:
+
+```text
+Charmander + Squirtle → Kanto Partners
+Pikachu + Eevee → Best Friends
+```
+
+Reward chủ yếu cosmetic / tiny Pokémon XP modifier.
+
+Không cho effect mạnh ảnh hưởng fairness.
+
+---
+
+# 37. MASTERY VISUAL AURA
+
+Mastery đã tồn tại.
+
+Thêm cosmetic theo stars:
+
+```text
+⭐       Bronze Aura
+⭐⭐      Silver Aura
+⭐⭐⭐     Gold Aura
+⭐⭐⭐⭐    Rainbow Aura
+⭐⭐⭐⭐⭐   Legendary Aura
+```
+
+Chỉ render CSS effect quanh Pokémon ở:
+
+- Random Solo.
+- Battle.
+- Boss party.
+- Profile.
+
+Không ảnh hưởng điểm.
+
+---
+
+# 38. DATA MODEL SUMMARY
+
+Suggested additions to `types.ts`:
+
+```ts
+export type EggKind = 'normal' | 'special' | 'legendary';
+
+export interface StudentEgg {
+  instanceId?: string;
+  progress: number;
+  status: 'egg' | 'hatched';
+  assignedDexId: number;
+  kind?: EggKind;
+  requiredProgress?: number;
+  acquiredAt?: number;
+  source?: 'shop' | 'boss' | 'reward' | 'system';
+}
+
+export interface TrainerProgress {
+  level: number;
+  xp: number;
+  totalXp: number;
+  titleId?: string;
+  unlockedTitleIds?: string[];
+}
+
+export interface BossContribution {
   studentId: string;
-  studentName: string;
-  releasedPet: PokemonPet;
-  remainingPets: PokemonPet[];
-  cause?: string;
+  successfulRounds: number;
+  damageDealt: number;
+  appearances: number;
+  failedRounds: number;
+  firstContributionAt?: number;
+  lastContributionAt?: number;
+}
+
+export interface BossInstance {
+  instanceId: string;
+  definitionId: string;
+  name: string;
+  maxHp: number;
+  currentHp: number;
+  failDamage: number;
+  damagePerSuccessfulStudent: number;
+  spawnedAt: number;
+  defeatedAt?: number;
+}
+
+export interface ClassBossState {
+  className: string;
+  boss: BossInstance;
+  randomsSinceLastEncounter: number;
+  nextEncounterAt: number;
+  encounterReady: boolean;
+  contributionByStudentId: Record<string, BossContribution>;
+  participantQueue: string[];
+  previousPartyIds?: string[];
+  defeatedBosses: number;
+  updatedAt: number;
 }
 ```
 
-## UI khi còn Pokémon
-
-Headline:
-
-> 💔 Pokémon đã rời đội hình
-
-Hiển thị Pokémon vừa mất + nguyên nhân.
-
-Ví dụ:
-
-> Charizard của Minh đã cạn HP và rời đội hình.
-
-Sau đó:
-
-> CHỌN POKÉMON ĐỒNG HÀNH MỚI
-
-Card từng Pokémon còn lại:
-
-- image.
-- nickname/species.
-- Level.
-- HP.
-- Bond.
-
-Click 1 card → set active → close modal.
-
-## UI khi hết Pokémon
-
-Hiển thị:
-
-> Bạn không còn Pokémon nào trong bộ sưu tập.
-
-CTA:
-
-> 🥚 Mua trứng Pokémon mới — 10 Hào Quang
-
-Nếu đủ Hào Quang:
-
-- mua trực tiếp hoặc chuyển tới Pet profile nhưng chỉ cần tối đa 1 click bổ sung.
-
-Nếu không đủ:
-
-> Cần thêm X Hào Quang để mua trứng.
-
-Cho nút:
-
-> Tiếp tục học không có Pokémon
-
-Không soft-lock.
-
----
-
-# 19. Pokémon Reaction System — PHASE 2
-
-Pokémon cần “sống” hơn nhưng không được làm chậm lớp.
-
-Không cần lưu Mood vào database.
-
-Mood/reaction chỉ là UI event tạm thời.
-
-## Reaction examples
-
-Positive Solo:
-
-- 😊 “Great!”
-- ⚡ “Pika!”
-- 🔥 “Nice answer!”
-
-High reward:
-
-- 🤩 bounce + glow.
-
-Negative score:
-
-- 😣 shake nhẹ.
-- hiển thị HP loss.
-
-Battle win:
-
-- victory animation.
-
-Battle loss:
-
-- determined animation, không shame.
-
-Level up:
-
-- flash nhẹ.
-
-Evolution:
-
-- special overlay 1.5–2 sec.
-
-## Performance rule
-
-- Dùng CSS/motion đơn giản.
-- Không tạo video/full canvas animation.
-- Không loop animation liên tục.
-- Không để reaction kéo dài >2 giây.
-- `pointer-events: none` cho overlay.
-
----
-
-# 20. Homework Streak — PHASE 3
-
-Đây là feature duy nhất chấp nhận thêm một thao tác nhỏ vì mục tiêu trực tiếp là làm BTVN chăm hơn.
-
-## UX tối ưu
-
-Trong màn hình lớp thêm nút:
-
-> 📚 CHECK HOMEWORK
-
-Click mở modal compact.
-
-### Default
-
-- Chỉ lấy học sinh đang present.
-- Tất cả mặc định `✅ DONE`.
-- Giáo viên chỉ click những em chưa làm để chuyển `❌ MISSING`.
-- Bấm `CONFIRM`.
-
-Với lớp 15 em, 2 em chưa làm → khoảng 3–4 click.
-
-## Rule
-
-### Done
-
-- `homeworkStreak + 1`.
-- best streak update.
-- active Pokémon `+15 XP`.
-- active Pokémon `+2 Bond`.
-
-### Missing
-
-- `homeworkStreak = 0`.
-- Không tự trừ Hào Quang.
-- Không tự damage HP.
-
-Nếu giáo viên muốn phạt vì quên BTVN, dùng hệ thưởng/phạt hiện có.
-
-Tránh double punishment tự động.
-
-## Milestones
-
-- 3 homework liên tiếp → +10 bonus XP.
-- 5 → +20 bonus XP.
-- 10 → special Drop / Candy ở Phase 4.
-- 20 → tăng Shiny Egg chance cho lần hatch kế tiếp ở Phase 4.
-
-## Lesson key
-
-Không dùng daily streak.
-
-Tạo:
+Student additions:
 
 ```ts
-lessonKey = `${className}:${YYYY-MM-DD}`
-```
-
-Mỗi student chỉ được Homework Check 1 lần cho `lessonKey`.
-
-Nếu modal mở lại trong cùng lesson:
-
-- hiển thị trạng thái “Đã chốt Homework”.
-- không cộng XP/streak lần hai.
-
-Có thể thêm admin-only reset check sau, không cần Phase 3 ban đầu.
-
-## Student đang không có Pokémon
-
-Homework Streak vẫn tăng.
-
-Nếu đang có egg nhưng chưa có active Pokémon:
-
-- có thể cộng `+1 egg progress` cho homework hoàn thành.
-- không cộng Pokémon XP/Bond vì chưa có Pokémon active.
-
----
-
-# 21. Instant Random Drops — PHASE 4
-
-Mục tiêu: tạo bất ngờ nhưng không cần Lucky Wheel 10 giây.
-
-## Trigger
-
-Chỉ trigger sau:
-
-- positive Solo result.
-- Battle result có score > 0.
-
-Base chance:
-
-```text
-6%
-```
-
-Gengar passive có thể x2 chance.
-
-## Phase 4A — Auto-applied drops
-
-Để giữ zero interaction, trước tiên không cần inventory phức tạp.
-
-Possible drops:
-
-| Drop | Effect |
-|---|---|
-| 🍬 Rare Candy | +15 XP |
-| 🍓 Oran Berry | +10 HP |
-| 💖 Friendship Ribbon | +3 Bond |
-| ⚡ Energy Spark | +1 Charge |
-
-Toast:
-
-> ✨ RARE DROP! 🍬 +15 XP
-
-Auto apply.
-
-Không mở modal.
-
-Duration ~1.2s.
-
-## Drop không được cộng Hào Quang
-
-Đây là Pokémon reward riêng.
-
----
-
-# 22. Shiny Pokémon — PHASE 4
-
-Mỗi Pokémon khi được tạo/hatch/gift có `isShiny`.
-
-## Base shiny chance
-
-```text
-2%
-```
-
-Không reroll shiny khi evolution.
-
-Shiny status gắn với `instanceId` và tồn tại suốt đời Pokémon đó.
-
-## Visual
-
-Nếu shiny:
-
-- dùng PokeAPI shiny artwork nếu endpoint có ảnh.
-- nếu không có ảnh, fallback normal artwork + gold/rainbow aura.
-- thêm badge `✨ SHINY`.
-
-## Homework bonus
-
-Có thể lưu:
-
-```ts
-nextEggShinyBonus?: number
-```
-
-Ví dụ Homework Streak 20 tăng chance lần hatch tiếp theo:
-
-- base 2% → 5%.
-- bonus consume sau khi hatch.
-
-Không cần làm ngay nếu data complexity cao; có thể để Phase 4B.
-
----
-
-# 23. Pokédex — PHASE 5
-
-Collection hiện `pets[]` chỉ chứa Pokémon đang sở hữu.
-
-Nếu Pokémon chết/release thì lịch sử collection bị mất.
-
-Tạo Pokédex permanent.
-
-## Khi Pokémon lần đầu được acquire/hatch/fusion
-
-```ts
-student.pokedex[dexId] = {
-  dexId,
-  discovered: true,
-  shinyDiscovered: isShiny,
-  firstDiscoveredAt: Date.now()
+export interface Student {
+  ...existing;
+  eggInventory?: StudentEgg[];
+  trainerProgress?: TrainerProgress;
+  earnedBadges?: EarnedBadge[];
+  adventureJournal?: AdventureJournalEntry[];
+  weeklyChest?: WeeklyChestProgress;
+  expedition?: PokemonExpedition;
+  supportPetInstanceId?: string;
 }
 ```
 
-Khi Pokémon bị mất:
-
-- xóa khỏi `pets[]`.
-- **không xóa Pokédex entry**.
-
-## UI
-
-Trong Pet Profile thêm tab/section:
-
-> 📕 MY POKÉDEX · 12/XX discovered
-
-- chưa có → silhouette.
-- đã từng có → artwork.
-- đã từng có shiny → shiny star.
-
-Không cần teacher interaction trong lớp.
-
----
-
-# 24. Mastery — PHASE 5
-
-Sau Level 30, Pokémon không level tiếp theo normal system.
-
-XP dư chuyển vào Mastery.
-
-## Mastery stars
-
-- ⭐ 1: 300 Mastery XP.
-- ⭐ 2: +400.
-- ⭐ 3: +500.
-- ⭐ 4: +600.
-- ⭐ 5: +800.
-
-Mastery không tăng Hào Quang.
-
-Reward chủ yếu cosmetic:
-
-- special border.
-- glow.
-- title.
-- Best Companion badge.
-
-Không tạo pay-to-win hoặc academic advantage lớn.
-
----
-
-# 25. Pokémon Profile UI 2.0
-
-Trong `profileTab === 'pet'` hiển thị hierarchy rõ ràng.
-
-## Hero card
-
-- artwork.
-- nickname.
-- species.
-- shiny badge.
-- Level.
-- HP.
-- XP.
-- Bond.
-- Charge.
-- Passive.
-- Mastery nếu Level 30.
-
-Ví dụ:
-
-```text
-PIKA ⚡
-Pikachu · Lv. 12
-❤️ 78/100
-XP 42/85
-💖 Bond 64/100
-⚡ Charge 3/5
-Passive: Static Charge Lv.2
-```
-
-## Evolution preview
-
-Hiển thị:
-
-> Next Evolution: Lv. 20
-
-hoặc:
-
-> Final Evolution Reached
-
-Không cần tính theo Hào Quang nữa.
-
-## Collection
-
-Giữ danh sách `pets[]` như hiện tại nhưng mỗi card thêm:
-
-- Lv.
-- HP.
-- Bond.
-- shiny.
-
----
-
-# 26. Student Card UI
-
-Không làm StudentCard quá dày.
-
-Chỉ thêm tối đa:
-
-- `Lv.X` nhỏ cạnh Pokémon.
-- HP bar như hiện có.
-- nếu shiny → sparkle icon.
-- nếu Pokémon Charge Ready → ⚡ icon.
-
-Không nhét XP/Bond/Streak đầy đủ lên dashboard lớp.
-
-Chi tiết xem trong Random/Profile.
-
----
-
-# 27. Egg System Integration
-
-Giữ egg progress hiện tại để không phá data/workflow.
-
-## Khi egg hatch
-
-Pokémon mới phải được init đầy đủ:
+Pokemon additions:
 
 ```ts
-{
-  instanceId,
-  dexId,
-  baseDexId,
-  speciesName,
-  nickname: undefined,
-  types,
-  hp: 100,
-  level: 1,
-  xp: 0,
-  totalXp: 0,
-  bond: 0,
-  charge: 0,
-  isShiny,
-  masteryXp: 0,
-  masteryStars: 0,
-  passiveId,
-  accessories: [],
-  skills: [],
-  skillUses: {}
+export interface PokemonPet {
+  ...existing;
+  natureId?: PokemonNatureId;
 }
 ```
 
-Mark Pokédex discovery khi Phase 5 tồn tại.
+---
 
-## Important
+# 39. BACKWARD COMPATIBILITY
 
-Egg hatching do positive Hào Quang hiện tại có thể tiếp tục chạy.
+Existing data phải mở được không lỗi.
 
-Không cần đổi toàn bộ incubation economy trong first release.
+Defaults:
+
+```ts
+student.eggInventory ??= []
+student.trainerProgress ??= getDefaultTrainerProgress()
+student.earnedBadges ??= []
+student.adventureJournal ??= []
+pet.natureId ??= deterministicNatureFromInstanceId(pet.instanceId)
+```
+
+Boss:
+
+```ts
+bossStatesByClass ??= {}
+```
+
+Không đổi ID hiện tại của student/Pokémon.
+
+Không reroll:
+
+- Shiny.
+- Nature.
+- Legendary Egg assignedDexId.
+- Expedition reward.
+
+sau reload/import.
 
 ---
 
-# 28. Fusion Integration
+# 40. SUPABASE / BACKUP
 
-Hệ thống fusion hiện có phải tiếp tục hoạt động.
-
-Khi fusion tạo Pokémon mới:
-
-- tạo `instanceId` mới.
-- HP theo rule fusion hiện tại hoặc 100 nếu current implementation như vậy.
-- Level đề xuất = floor average level của 2 input Pokémon), clamp min 1 max 30.
-- XP = 0 tại level mới.
-- Bond = floor average Bond / 2 hoặc reset 0. Đề xuất reset 0 để Pokémon mới cần xây bond lại.
-- Charge = 0.
-- skills: giữ theo logic hiện tại.
-- passive derive từ new baseDexId.
-- Mastery reset 0.
-
-### Shiny fusion
-
-Phase đầu đơn giản:
-
-- nếu cả 2 input shiny → output shiny.
-- nếu chỉ 1 shiny → output normal.
-
-Không thêm RNG mới cho fusion trong first pass.
-
----
-
-# 29. Lucky Wheel Integration
-
-Lucky Wheel hiện có reward:
-
-- points,
-- pokemon,
-- skill,
-- hp,
-- ludo rolls.
-
-## Nếu reward Pokémon
-
-Pokémon mới phải init data model mới đầy đủ.
-
-## Nếu reward points
-
-Đi qua reward/punishment Aura path → HP coupling như hiện tại.
-
-## Nếu reward HP
-
-Chỉ đổi HP, không đổi Hào Quang, không cấp Pokémon XP.
-
-## Nếu reward skill
-
-Không ảnh hưởng HP.
-
-Không để Lucky Wheel spin tự tạo Answer Streak.
-
----
-
-# 30. Purchase Integration
-
-## Buy Skill
-
-Current behavior:
-
-- trừ Hào Quang.
-- add skill.
-- không damage Pokémon.
-
-Giữ đúng.
-
-## Buy Egg
-
-- trừ Hào Quang 10.
-- không damage Pokémon.
-- tạo egg state.
-
-Nếu mua trứng trong release flow vì không còn Pokémon:
-
-- không có active pet nên đương nhiên không có HP damage.
-
----
-
-# 31. History / Audit Trail
-
-History phải vẫn dễ hiểu.
-
-Không cần ghi từng +1 Bond/+5 XP vào `student.history`, nếu không history sẽ spam.
-
-`student.history` chỉ ghi các sự kiện lớn:
-
-- Hào Quang.
-- hatch.
-- evolution.
-- Pokémon lost/released.
-- Pokémon acquired.
-- Level milestone quan trọng nếu muốn.
-- Shiny hatch.
-- Mastery star.
-
-XP/Bond/Streak nhỏ chỉ hiển thị UI event, không ghi History.
-
----
-
-# 32. Supabase / Persistence
-
-## Core phases
-
-Không cần tạo column mới cho từng field Pokémon vì `students` là JSONB.
-
-`supabaseData.ts` đã sync toàn `Student[]`.
-
-Chỉ cần đảm bảo:
-
-- normalize data sau fetch.
-- normalize data sau import.
-- fields mới serialize sạch qua `sanitizeForSupabase`.
-
-## Không phá dữ liệu cũ
+Mọi field mới phải được đưa vào snapshot persistence.
 
 Test:
 
-- user cũ login → Pokémon vẫn còn.
-- HP không reset.
-- skill không mất.
-- skillUses không mất.
-- pets collection không mất.
-- egg không mất.
-- history không mất.
+1. Create Boss state.
+2. Damage Boss.
+3. Refresh.
+4. Boss HP phải giữ nguyên.
+5. Contribution leaderboard giữ nguyên.
+6. Encounter counter giữ nguyên.
+7. Legendary Egg inventory giữ nguyên.
+8. Nature giữ nguyên.
+9. Trainer XP giữ nguyên.
+
+JSON export/import cũng phải giữ toàn bộ field mới.
 
 ---
 
-# 33. Performance Requirements
+# 41. PERFORMANCE RULES
 
-App dùng trong tiết học nên phải phản hồi tức thời.
+Không tạo timer re-render mỗi giây cho tất cả students.
 
-## Không được
+Boss encounter dùng counters/events, không polling.
 
-- network call trong mỗi point event để tính game logic.
-- gọi Gemini cho Pokémon progression.
-- animation loop nặng.
-- modal liên tiếp sau mọi câu trả lời.
-- Lucky Wheel-like 10s animation cho automatic reward.
+Expedition dùng timestamp compute khi cần.
 
-## Nên
+Use `useMemo` cho:
 
-- game logic pure local.
-- React state update một lần/event nếu có thể.
-- batch derived effects.
-- toast auto-dismiss.
-- CSS/motion nhẹ.
-- memoize display helpers nếu cần.
+- Boss eligible students.
+- Top contributors.
+- Current class Boss state view.
+
+Không sort toàn bộ students nhiều lần mỗi render nếu không cần.
+
+Không thêm heavy animation library chỉ vì Boss.
 
 ---
 
-# 34. Accessibility / Classroom Readability
+# 42. MOBILE / SMALL SCREEN
 
-Imperial School thường chiếu trên màn hình lớp.
+Boss party có 5 trainer.
 
-- Không dùng font quá nhỏ cho XP/HP quan trọng.
-- Contrast cao.
-- Pokémon stat tối thiểu 11–12px tương đương Tailwind practical size trên desktop.
-- Không dựa hoàn toàn vào màu để phân biệt HP/status.
-- Animation ngắn, không gây chóng mặt.
-
----
-
-# 35. Implementation Order
-
-Không code tất cả một lần.
-
-## PHASE 0 — Safe foundation
-
-1. Tạo `instanceId` support.
-2. Tạo migration/normalizer.
-3. Sửa `isSamePokemon` dùng `instanceId`.
-4. Tách species/nickname theo hướng backward-compatible.
-5. Tạo `pokemonProgression.ts`.
-6. Tạo `gameEvents.ts` skeleton.
-7. Đảm bảo build pass.
-
-### Acceptance
-
-- app chạy như cũ.
-- không feature mới visible cũng được.
-- dữ liệu cũ load được.
-- selection/remove/fusion vẫn đúng.
-
----
-
-## PHASE 1 — Core Pokémon RPG
-
-Implement:
-
-1. XP.
-2. Level.
-3. evolution by Level.
-4. Bond.
-5. Answer Streak.
-6. Battle Win Streak.
-7. Charge.
-8. Passive Ability.
-9. preserve HP→release flow.
-
-### Acceptance
-
-- Solo +3 → Hào Quang +3, HP +3, Pokémon +15 base XP.
-- Solo -3 → Hào Quang -3, HP -3, no XP.
-- answer streak automatic.
-- level up automatic.
-- evolution automatic.
-- passive automatic.
-- no extra teacher click.
-- HP 0 removes Pokémon exactly once.
-
----
-
-## PHASE 2 — Classroom UI
-
-Implement:
-
-1. Random Solo status.
-2. Battle status.
-3. reaction toast.
-4. level-up/evolution animation lightweight.
-5. release modal 2.0.
-6. profile Pokémon progression panel.
-7. StudentCard compact indicators.
-
-### Acceptance
-
-- teacher workflow unchanged.
-- no blocking popup after normal answer.
-- release modal works after Solo/manual/Battle.
-
----
-
-## PHASE 3 — Homework Streak
-
-Implement compact homework modal.
-
-### Acceptance
-
-- present students default DONE.
-- click missing students only.
-- confirm once/lesson.
-- Done updates streak/XP/Bond.
-- Missing resets streak.
-- no auto Hào Quang penalty.
-
----
-
-## PHASE 4 — Surprise layer
-
-Implement:
-
-1. Instant Drops.
-2. Shiny.
-3. special visuals.
-
-### Acceptance
-
-- no extra teacher click.
-- drops auto apply.
-- shiny persists through evolution/sync/export/import.
-
----
-
-## PHASE 5 — Long-term collection
-
-Implement:
-
-1. Pokédex.
-2. Mastery.
-3. collection polish.
-
----
-
-# 36. Testing Plan
-
-Nên thêm Vitest cho pure game logic.
-
-Nếu không muốn thêm test framework, ít nhất phải viết manual test checklist và chạy build sau từng phase.
-
-## Unit tests quan trọng
-
-### HP
-
-- HP 100 +3 =100.
-- HP 50 -3 =47.
-- HP 2 -3 → release.
-- release remove đúng `instanceId`.
-- nếu có 2 Pokémon cùng dexId, chỉ đúng instance bị remove.
-
-### Purchases
-
-- buy skill -20 Hào Quang nhưng HP không đổi.
-- buy egg -10 Hào Quang nhưng HP không đổi.
-
-### Battle
-
-- diff 3 → winner +3 HP, loser -3 HP.
-- không double apply generic Aura HP.
-- loser pet về 0 → release modal.
-
-### XP
-
-- Solo +3 → +15 XP.
-- Solo -3 → 0 XP.
-- XP overflow level correctly.
-- negative event never decreases XP.
-
-### Streak
-
-- +, +, + → streak 3 + milestone.
-- +, - → reset.
-- manual admin +5 không tăng Answer Streak.
-
-### Evolution
-
-- Lv4 stage0.
-- Lv5 stage1.
-- Lv12 stage2.
-- Lv20 stage3.
-- Lv30 stage4.
-- evolution preserves skills/HP/bond/shiny/nickname.
-
-### Migration
-
-- old pet no `instanceId` → gets ID.
-- old pet no level → no de-evolution.
-- duplicate same species → each has unique instanceId.
-
-### Homework
-
-- confirm same lesson twice → no duplicate reward.
-- missing resets streak.
-- absent student not processed.
-
-### Sync
-
-- save/reload Supabase preserves all new fields.
-- JSON export/import preserves all new fields.
-
----
-
-# 37. Manual Classroom Scenario Test
-
-Dùng scenario này trước khi coi feature hoàn thành.
-
-## Student A
-
-- Pikachu Lv1, HP 90.
-- Random Solo.
-- teacher gives +3.
-
-Expected:
-
-- Hào Quang +3.
-- HP 93.
-- +15 XP.
-- Bond +1.
-- Answer Streak 1.
-- Charge 1.
-- UI reaction tự biến mất.
-
-## Lần 2 +3
-
-- +15 XP.
-- Streak 2.
-- Charge 2.
-
-## Lần 3 +3
-
-- Streak 3.
-- milestone XP bonus.
-- Pikachu Static Charge triggers.
-- Charge 3.
-
-Không cần teacher bấm gì thêm ngoài chấm điểm.
-
-## Negative scenario
-
-Pikachu HP 2.
-
-Teacher applies -3 Hào Quang.
-
-Expected:
-
-- points -3.
-- Pikachu HP 0.
-- Pokémon bị remove khỏi `pets`.
-- active pet undefined.
-- Answer Streak reset nếu event là Solo.
-- release modal hiện.
-
-Nếu còn Squirtle:
-
-- modal hiển thị Squirtle.
-- chọn Squirtle.
-- Squirtle trở thành active.
-
-Nếu không còn Pokémon:
-
-- modal hiển thị mua trứng.
-- nếu >=10 Hào Quang → mua được.
-- nếu <10 → disabled + số còn thiếu + có thể tiếp tục học không Pokémon.
-
----
-
-# 38. Do NOT Do These Things
-
-1. Không đổi HP=0 thành faint/revive.
-2. Không tự tặng replacement Pokémon miễn phí.
-3. Không bắt giáo viên xác nhận XP/Bond/Passive từng lần.
-4. Không tạo Daily Streak theo ngày liên tục.
-5. Không bắt học sinh giơ tay mới có progression.
-6. Không tạo quest yêu cầu teacher tick liên tục.
-7. Không cộng quá nhiều popup.
-8. Không dùng Gemini/API để quyết định XP/drop/passive.
-9. Không dùng `reason.includes(...)` làm nguồn truth cho event type.
-10. Không phá các feature hiện có.
-11. Không reset data cũ.
-12. Không để 2 Pokémon cùng loài bị nhầm vì dùng dexId/name làm identity.
-13. Không double HP damage trong Battle.
-14. Không cho spending Hào Quang làm damage HP.
-15. Không làm evolution random lại form mỗi update.
-
----
-
-# 39. Definition of Done cho bản Pokémon Core 2.0
-
-Bản đầu tiên được coi là hoàn thành khi:
-
-- [ ] Dữ liệu cũ migrate an toàn.
-- [ ] Mỗi Pokémon có stable `instanceId`.
-- [ ] XP + Level hoạt động.
-- [ ] Evolution dựa trên Level.
-- [ ] Bond hoạt động.
-- [ ] Answer Streak hoạt động tự động.
-- [ ] Battle Win Streak hoạt động tự động.
-- [ ] Charge hoạt động tự động.
-- [ ] Passive Ability hoạt động tự động.
-- [ ] Random Solo hiển thị progression mới.
-- [ ] Battle hiển thị progression mới.
-- [ ] Pokémon reaction không blocking.
-- [ ] Hào Quang thưởng/phạt vẫn liên kết HP.
-- [ ] Spending Hào Quang không làm mất HP.
-- [ ] Battle HP logic không bị double.
-- [ ] HP = 0 vẫn mất Pokémon.
-- [ ] Pokémon bị mất được remove đúng khỏi collection.
-- [ ] Modal chọn Pokémon khác hoạt động.
-- [ ] Nếu hết Pokémon, có flow mua trứng.
-- [ ] Không đủ tiền mua trứng không soft-lock app.
-- [ ] Skills 2-use vẫn hoạt động.
-- [ ] Fusion vẫn hoạt động.
-- [ ] Lucky Wheel vẫn hoạt động.
-- [ ] Cá Ngựa vẫn hoạt động.
-- [ ] Supabase sync không lỗi.
-- [ ] JSON backup/import không lỗi.
-- [ ] `npm run build` pass.
-
----
-
-# 40. Codex Execution Instructions
-
-Codex nên làm theo thứ tự sau:
-
-1. Đọc toàn bộ `PLAN.md` trước khi sửa.
-2. Đọc `Progress.md`, `types.ts`, `pokemonData.ts`, `App.tsx`, `StudentCard.tsx`, `supabaseData.ts`.
-3. Không viết lại app từ đầu.
-4. Không thay UI ngoài scope nếu không cần.
-5. Tạo foundation/migration trước.
-6. Chạy `npm run build` sau mỗi phase.
-7. Nếu build fail, fix trước khi sang phase tiếp.
-8. Giữ backward compatibility với dữ liệu local/Supabase cũ.
-9. Với mỗi phase hoàn thành, cập nhật `Progress.md`:
-   - Completed.
-   - Files changed.
-   - Manual steps nếu có.
-   - Known limitations.
-10. Nếu phát hiện behavior hiện tại mâu thuẫn với PLAN, ưu tiên các mục **NON-NEGOTIABLE RULES** trong file này.
-
----
-
-# 41. Recommended First Coding Scope
-
-Để tránh một PR quá lớn, lần chạy Codex đầu tiên chỉ nên làm:
-
-## Milestone A
-
-- stable `instanceId`.
-- migration.
-- XP.
-- Level.
-- Bond.
-- Answer Streak.
-- Charge.
-- evolution by level.
-- preserve HP death/release.
-- minimal UI trong Random Solo.
-
-Sau khi Milestone A ổn và build pass mới làm:
-
-## Milestone B
-
-- Passive Ability.
-- Battle integration.
-- reaction toast.
-- release modal polish.
-
-Sau đó:
-
-## Milestone C
-
-- Homework Streak.
-- Drops.
-- Shiny.
-- Pokédex.
-- Mastery.
-
----
-
-# Final Product Principle
-
-Imperial School không nên trở thành một game buộc giáo viên dành thêm 10–15 phút để vận hành.
-
-Nó phải tạo cảm giác game **tự xuất hiện từ chính quá trình học**:
+Desktop:
 
 ```text
-Random → trả lời → chấm điểm
-               ↓
-       Hào Quang / HP
-               ↓
-      XP / Level / Bond
-               ↓
-   Streak / Charge / Passive
-               ↓
-      Evolution / Shiny
-               ↓
-     Attachment với Pokémon
+5 cards một hàng nếu đủ rộng.
 ```
 
-Giáo viên vẫn dạy như cũ.
+Tablet/small screen:
 
-Học sinh lại cảm thấy mỗi câu trả lời đều đang “nuôi” Pokémon của mình.
+```text
+3 + 2 grid hoặc horizontal scroll.
+```
 
-Đó là mục tiêu cốt lõi của Imperial School Pokémon Companion System 2.0.
+Không làm student name quá nhỏ.
+
+Boss HP và 2 resolve buttons phải luôn dễ nhìn.
+
+---
+
+# 43. MILESTONE IMPLEMENTATION ORDER
+
+## MILESTONE A — BOSS CORE [P0]
+
+Implement trước, không làm feature khác trong cùng milestone.
+
+Tasks:
+
+- [ ] Add `RandomMode = solo | battle | boss`.
+- [ ] Add Boss tab.
+- [ ] Add Boss data types.
+- [ ] Create `bossSystem.ts`.
+- [ ] Add per-class Boss state.
+- [ ] Add encounter threshold 8–14 normal Randoms.
+- [ ] Add Boss priority to Random flow.
+- [ ] Add fair 5-trainer party queue.
+- [ ] Add `BossBattlePanel`.
+- [ ] Add Success resolve.
+- [ ] Add Failure resolve.
+- [ ] Add Boss HP persistence.
+- [ ] Add contribution tracking.
+- [ ] Add multi-release queue for multiple Pokémon deaths.
+- [ ] Add Boss defeated modal.
+- [ ] Add unit tests.
+
+Do not implement Legendary Egg reward yet if Egg Inventory dependency is not ready. Temporary dev reward can be disabled until Milestone B.
+
+---
+
+## MILESTONE B — LEGENDARY EGG + FINAL BOSS REWARD [P0]
+
+- [ ] Extend EggKind with `legendary`.
+- [ ] Add Legendary Pokémon pool.
+- [ ] Add `eggInventory`.
+- [ ] Add Egg Inventory UI.
+- [ ] Add Start Incubating flow.
+- [ ] Legendary Egg required progress = 30.
+- [ ] Legendary Egg not sold in Shop.
+- [ ] Boss Top 5 receive +5 Aura.
+- [ ] Boss Top 5 receive 1 Legendary Egg.
+- [ ] Prevent overwrite of active egg.
+- [ ] Persist/import egg inventory.
+- [ ] Test duplicate Legendary Eggs.
+
+At completion of Milestone B, Boss feature is product-complete.
+
+---
+
+## MILESTONE C — NATURE + TRAINER PROGRESSION [P1]
+
+- [ ] Pokémon Nature.
+- [ ] Deterministic migration for old Pokémon.
+- [ ] Trainer Level / XP.
+- [ ] Trainer Titles.
+- [ ] Boss Hunter / Boss Slayer titles.
+- [ ] Integrate with existing game events.
+- [ ] Keep UI compact.
+
+---
+
+## MILESTONE D — GYM BADGES [P1]
+
+- [ ] Badge definitions.
+- [ ] Automatic detection.
+- [ ] Profile Badge section.
+- [ ] Boss Raid / Boss Slayer Badge.
+- [ ] Trainer XP reward for badge milestones.
+
+---
+
+## MILESTONE E — EXPEDITION [P1]
+
+- [ ] Expedition data type.
+- [ ] Timestamp-based resolve.
+- [ ] Deterministic reward seed.
+- [ ] Expedition result card.
+- [ ] Nature modifiers.
+- [ ] Small rewards only.
+
+---
+
+## MILESTONE F — WEEKLY CHEST + EGG FRAGMENTS [P2]
+
+- [ ] Weekly progress.
+- [ ] Auto progress from existing events.
+- [ ] Weekly reset key.
+- [ ] Claim flow.
+- [ ] Egg fragments.
+- [ ] Egg crafting.
+
+---
+
+## MILESTONE G — ADVENTURE JOURNAL [P2]
+
+- [ ] Milestone event journal.
+- [ ] Boss wins.
+- [ ] Pokémon lost history.
+- [ ] Trainer milestones.
+- [ ] Compact timeline UI.
+
+---
+
+## MILESTONE H — SUPPORT + SYNERGY + COSMETICS [P3]
+
+- [ ] Support Pokémon slot.
+- [ ] Tiny support bonuses.
+- [ ] Synergy definitions.
+- [ ] Mastery Aura visuals.
+
+---
+
+# 44. BOSS ACCEPTANCE CRITERIA
+
+Boss Milestones A+B chỉ được coi là hoàn thành khi tất cả case sau pass.
+
+## Case 1 — Boss không xuất hiện quá sớm
+
+Given:
+
+- Boss encounter vừa resolve.
+- `nextEncounterAt = 11`.
+
+Then:
+
+- 10 resolved Solo/Battle không mở Boss.
+- Lượt Random tiếp theo mở Boss.
+
+## Case 2 — Boss selects exactly 5
+
+Given:
+
+- 15 students present.
+- 13 students have active Pokémon.
+
+Then:
+
+- Boss party = exactly 5 eligible trainers.
+
+## Case 3 — <5 eligible
+
+Given:
+
+- Boss encounter ready.
+- Chỉ 4 students có active Pokémon.
+
+Then:
+
+- Boss không consume encounter.
+- Không reset counter.
+- Có thể fallback Solo/Battle.
+- Boss remains ready.
+
+## Case 4 — All 5 correct
+
+Given:
+
+- Boss HP = 500.
+- 5 selected trainers.
+
+When:
+
+- Teacher presses `Cả 5 đều đúng`.
+
+Then:
+
+- each +5 Aura.
+- each active Pokémon +5 HP via current Aura rule, clamp 100.
+- Boss HP = 475.
+- each contribution damage += 5.
+- no Boss fail damage.
+
+## Case 5 — At least 1 wrong
+
+Given:
+
+- Boss failDamage = 10.
+
+When:
+
+- Teacher presses `Có ít nhất 1 bạn sai`.
+
+Then:
+
+- Boss HP unchanged.
+- all 5 active Pokémon -10 HP.
+- no Aura deducted.
+- no Trainer XP penalty.
+- no Pokémon XP/Bond penalty.
+
+## Case 6 — One Pokémon dies
+
+Given:
+
+- Selected trainer Pokémon HP = 8.
+- Boss failure damage = 10.
+
+Then:
+
+- Pokémon HP reaches 0.
+- Pokémon removed using existing release logic.
+- release selection UI appears.
+
+## Case 7 — Three Pokémon die simultaneously
+
+Then:
+
+- all 3 release events are queued.
+- user resolves them one-by-one.
+- none is lost/overwritten.
+
+## Case 8 — Boss dies
+
+Given:
+
+- Boss HP = 20.
+
+When:
+
+- party succeeds for 25 damage.
+
+Then:
+
+- Boss HP becomes 0, never negative.
+- standard success reward applies to 5 party members.
+- Boss Defeated modal appears.
+- Top 5 contributors determined deterministically.
+- each Top 5 gets additional +5 Aura.
+- each Top 5 gets exactly 1 Legendary Egg.
+
+## Case 9 — Student already incubating egg
+
+When:
+
+- student receives Legendary Egg.
+
+Then:
+
+- current `student.egg` remains unchanged.
+- Legendary Egg goes to `eggInventory`.
+
+## Case 10 — Student has no active Pokémon at Boss reward
+
+Then:
+
+- receives +5 Aura.
+- receives Legendary Egg.
+- no HP healing occurs because no active pet.
+- no crash.
+
+## Case 11 — Refresh midway through Boss lifecycle
+
+Then:
+
+- Boss currentHp persists.
+- contributions persist.
+- next encounter counter persists.
+
+## Case 12 — Switch class
+
+Then:
+
+- each class has independent Boss HP/counter/contributions.
+
+## Case 13 — Backup/import
+
+Then:
+
+- Boss state preserved.
+- Legendary Eggs preserved.
+- assigned Legendary Pokémon does not reroll.
+
+---
+
+# 45. UNIT TESTS REQUIRED
+
+Create `bossSystem.test.ts`.
+
+Tests at minimum:
+
+```text
+rollNextBossEncounterGap() always 8..14
+increment counter
+encounter ready threshold
+select exactly 5 eligible students
+exclude absent students
+exclude students without active pet
+fair queue cycling
+success boss damage
+failure boss damage = 0
+contribution update
+Top 5 sorting/tiebreak
+Boss HP clamp 0
+Boss defeated state
+```
+
+Extend `gameEvents.test.ts` for:
+
+```text
+Boss success Aura reward
+Boss failure does not alter Aura
+Boss Top 5 reward
+Trainer XP when later implemented
+```
+
+Egg tests:
+
+```text
+legendary egg pre-roll
+legendary egg persists assignedDexId
+boss reward pushes to inventory
+active egg is not overwritten
+```
+
+---
+
+# 46. MANUAL QA SCRIPT
+
+Codex should manually verify after implementation:
+
+1. Open a class with >=10 students.
+2. Mark at least 5 present and ensure they have active Pokémon.
+3. Run Solo/Battle until Boss appears.
+4. Verify Boss opens automatically.
+5. Verify exactly 5 students.
+6. Success → all +5 Aura, Boss -25 HP.
+7. Failure → all Pokémon -Boss damage, Aura unchanged.
+8. Force one Pokémon to low HP and fail.
+9. Verify release modal.
+10. Force multiple low-HP Pokémon and fail.
+11. Verify release queue.
+12. Damage Boss to near zero.
+13. Kill Boss.
+14. Verify Top 5.
+15. Verify Top 5 +5 Aura.
+16. Verify Top 5 Legendary Egg inventory.
+17. Refresh.
+18. Verify persistence.
+19. Switch class and confirm independent Boss.
+20. Export JSON, re-import and confirm no data loss.
+
+---
+
+# 47. UX PRINCIPLES
+
+## Keep Random fast
+
+Boss must not turn one question into a 2-minute flow.
+
+Target teacher actions per Boss encounter:
+
+```text
+Random button
+→ 5 students appear
+→ students answer
+→ teacher presses ONE resolution button
+→ continue lesson
+```
+
+## Do not show too many popups
+
+Success/failure → inline result/toast.
+
+Only major modals:
+
+- Pokémon died.
+- Boss defeated.
+- Legendary Egg reward summary.
+
+## Large readable text
+
+The classroom screen is viewed from distance.
+
+Do not make Boss student names/HP tiny just to fit 5 cards.
+
+---
+
+# 48. BALANCING CONSTANTS — KEEP CENTRALIZED
+
+Do not hardcode Boss numbers throughout `App.tsx`.
+
+Create `bossConfig.ts` or constants in `bossSystem.ts`:
+
+```ts
+export const BOSS_CONFIG = {
+  minRandomGap: 8,
+  maxRandomGap: 14,
+  partySize: 5,
+  successAuraReward: 5,
+  topContributorAuraReward: 5,
+  topContributorCount: 5,
+  standardBossHp: 500,
+  standardFailDamage: 10,
+  damagePerSuccessfulStudent: 5,
+  legendaryEggRequiredProgress: 30,
+};
+```
+
+Sau này balancing chỉ sửa một nơi.
+
+---
+
+# 49. OUT OF SCOPE FOR THIS PLAN
+
+Không implement trong phase này:
+
+- Global Pokédex.
+- PvP online giữa lớp.
+- Real-time multiplayer server.
+- Pokémon trading giữa học sinh.
+- Marketplace.
+- Microtransactions.
+- Daily login reward.
+- Nhiệm vụ yêu cầu giáo viên xác nhận thủ công.
+- Hand-raise tracking.
+- Boss requiring 5 separate score inputs.
+- Boss animation dài.
+- Legendary Egg bán trong Shop.
+- Revive Pokémon đã mất.
+
+---
+
+# 50. FINAL PRODUCT LOOP
+
+Sau Imperial School 3.0, workflow lý tưởng:
+
+```text
+Teacher Random
+      ↓
+Solo / Battle bình thường
+      ↓
+Pokémon XP / Level / Bond / Streak / Nature tự chạy
+      ↓
+Sau 8–14 Random hợp lệ
+      ↓
+👹 BOSS ENCOUNTER
+      ↓
+Random 5 trainer
+      ↓
+Cả 5 cùng trả lời
+      ↓
+┌───────────────────────────────┐
+│ ALL CORRECT                   │
+│ +5 Aura each                 │
+│ Boss -25 HP                  │
+│ Contribution +5 each         │
+└───────────────────────────────┘
+               OR
+┌───────────────────────────────┐
+│ AT LEAST ONE WRONG            │
+│ Boss takes 0 damage           │
+│ All 5 Pokémon -10 HP          │
+└───────────────────────────────┘
+      ↓
+Boss persists across lessons
+      ↓
+Boss HP = 0
+      ↓
+🏆 TOP 5 CONTRIBUTORS
+      ↓
++5 Aura + Legendary Egg each
+      ↓
+New Boss lifecycle begins
+```
+
+Trong khi đó hệ dài hạn tự động chạy:
+
+```text
+Pokémon Nature
+Trainer Level
+Trainer Titles
+Gym Badges
+Expedition
+Weekly Chest
+Egg Fragments
+Adventure Journal
+Support Pokémon
+Mastery Aura
+```
+
+Mục tiêu cuối cùng:
+
+> **Imperial School phải tạo cảm giác học sinh đang sở hữu và nuôi một Pokémon thực sự qua nhiều tháng, trong khi giáo viên vẫn chủ yếu chỉ làm đúng công việc hiện tại: Random → nghe câu trả lời → chấm → tiếp tục bài học.**
+
+---
+
+# 51. CODEX EXECUTION INSTRUCTION
+
+Codex phải làm theo thứ tự:
+
+1. Đọc toàn bộ repository trước khi sửa.
+2. Đọc `PLAN.md` này.
+3. Đọc `Progress.md` và `docs/architecture.md` để hiểu legacy assumptions nhưng ưu tiên behavior thật trong code mới nhất.
+4. **Chỉ implement MILESTONE A trước.**
+5. Chạy typecheck/tests/build.
+6. Fix regression.
+7. Cập nhật `Progress.md` mô tả chính xác những gì đã hoàn thành.
+8. Sau khi Milestone A ổn định mới implement Milestone B.
+9. Không tự ý implement Global Pokédex.
+10. Không tự thay đổi luật HP = 0 → mất Pokémon.
+11. Không tự thay đổi reward Boss đã mô tả trong PLAN.
+12. Không refactor unrelated UI trong cùng commit nếu không cần thiết.
+

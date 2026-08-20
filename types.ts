@@ -11,12 +11,17 @@ export interface HistoryItem {
   timestamp: number;
 }
 
+export type EggKind = 'normal' | 'special' | 'legendary';
+
 export interface StudentEgg {
+  instanceId?: string;
   progress: number; // For egg status: 0-10. At 10, it hatches.
   status: 'egg' | 'hatched';
   assignedDexId: number; // Pre-rolled so they get a specific Pokémon
-  kind?: 'normal' | 'special';
+  kind?: EggKind;
   requiredProgress?: number;
+  acquiredAt?: number;
+  source?: 'shop' | 'boss' | 'reward' | 'system';
 }
 
 export interface PokemonPet {
@@ -78,6 +83,7 @@ export interface Student {
   attendanceStatus?: AttendanceStatus;
   customAvatar?: string; // Custom Base64 avatar photo uploaded for student
   egg?: StudentEgg;
+  eggInventory?: StudentEgg[];
   pet?: PokemonPet;
   pets?: PokemonPet[]; // List of all acquired pets
   pokemonProgress?: StudentPokemonProgress;
@@ -122,4 +128,65 @@ export interface Skill {
   icon: string;
   points: number;
   type: 'positive' | 'negative';
+}
+
+export type BossTier = 'standard' | 'elite' | 'legendary';
+
+export interface BossDefinition {
+  id: string;
+  name: string;
+  image?: string;
+  icon: string;
+  maxHp: number;
+  failDamage: number;
+  damagePerSuccessfulStudent: number;
+  tier: BossTier;
+}
+
+export interface BossInstance {
+  instanceId: string;
+  definitionId: string;
+  name: string;
+  icon: string;
+  maxHp: number;
+  currentHp: number;
+  failDamage: number;
+  damagePerSuccessfulStudent: number;
+  tier: BossTier;
+  spawnedAt: number;
+  defeatedAt?: number;
+}
+
+export interface BossContribution {
+  studentId: string;
+  successfulRounds: number;
+  damageDealt: number;
+  appearances: number;
+  failedRounds: number;
+  firstContributionAt?: number;
+  lastContributionAt?: number;
+}
+
+export interface ClassBossState {
+  className: string;
+  boss: BossInstance;
+  randomsSinceLastEncounter: number;
+  nextEncounterAt: number;
+  encounterReady: boolean;
+  contributionByStudentId: Record<string, BossContribution>;
+  participantQueue: string[];
+  previousPartyIds?: string[];
+  defeatedBosses: number;
+  resolvedRoundIds?: string[];
+  updatedAt: number;
+}
+
+export interface ActiveBossRound {
+  roundId: string;
+  bossInstanceId: string;
+  className: string;
+  partyStudentIds: string[];
+  openedAt: number;
+  resolvedAt?: number;
+  result?: 'success' | 'failure';
 }

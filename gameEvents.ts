@@ -17,7 +17,11 @@ export type GameEventType =
   | 'HOMEWORK_COMPLETE'
   | 'HOMEWORK_MISSING'
   | 'EGG_HATCHED'
-  | 'POKEMON_ACQUIRED';
+  | 'POKEMON_ACQUIRED'
+  | 'BOSS_ROUND_SUCCESS'
+  | 'BOSS_ROUND_FAILURE'
+  | 'BOSS_DEFEATED'
+  | 'BOSS_TOP_CONTRIBUTOR_REWARD';
 
 export type GameEventSource =
   | 'solo'
@@ -26,6 +30,7 @@ export type GameEventSource =
   | 'skill'
   | 'lucky-wheel'
   | 'homework'
+  | 'boss'
   | 'system';
 
 export interface GameEvent {

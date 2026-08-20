@@ -2,6 +2,19 @@
 
 ## Completed
 
+- Added Imperial School 3.0 Boss Raid Milestone 1:
+  - Added per-class Boss state with pre-rolled encounter gaps, encounter readiness, active boss HP, fair participant queue, previous-party avoidance, and contribution tracking in `bossSystem.ts`.
+  - Added Boss tab to Random with hidden-preview state and Boss priority when an encounter is ready, so ready Boss rounds cannot be bypassed by forcing Solo/Battle.
+  - Added quick Boss round UI with 5 eligible trainers, Boss HP bar, compact top contributor list, and two resolve buttons: all correct or at least one wrong.
+  - Boss success now gives each party trainer +5 Hào Quang through the shared Aura→egg progress/HP recovery path and damages Boss HP.
+  - Boss failure now deals direct Pokémon HP damage only, without Hào Quang/streak/XP penalties.
+  - Added multi-release queue support so multiple Pokémon defeated by the same Boss failure are handled one by one in the existing release modal.
+  - Added Boss defeat flow with Top 5 contributor rewards: +5 Hào Quang and 1 Legendary Egg.
+  - Added Legendary Egg kind, pre-rolled legendary pool, required progress 30, and `eggInventory` so Boss rewards never overwrite the active egg/incubator.
+  - Added Egg Inventory UI in the Pokémon profile tab with counts and a start-incubating action when the incubator is free.
+  - Persisted `bossStatesByClass` through guest localStorage, Supabase sync, JSON backup/export, and JSON import.
+- Verified production build with `npm run build` after Boss Raid Milestone 1 changes.
+- Verified existing test suite with `npm test` after Boss Raid Milestone 1 changes.
 - Migrated authentication from Firebase Auth to Supabase Auth in `AuthContext.tsx`.
 - Migrated cloud data sync from Firestore to Supabase in `App.tsx`.
 - Added `supabaseClient.ts` for Vite Supabase environment config.
@@ -105,7 +118,7 @@
 ## Manual Steps Needed
 
 1. In Supabase, open SQL Editor and run the full contents of `supabase-schema.sql`.
-   - If you already ran the older schema, run it again so `user_settings.pet_skills`, `wheel_spin_sound_url`, `wheel_finish_sound_url`, and `lucky_wheel_rewards` are added.
+   - If you already ran the older schema, run it again so `user_settings.pet_skills`, `wheel_spin_sound_url`, `wheel_finish_sound_url`, `lucky_wheel_rewards`, and `boss_states_by_class` are added.
 2. In Supabase Auth, make sure Email login is enabled.
 3. If users cannot log in right after signing up, either confirm their email from the Supabase email, or disable required email confirmation for development/testing.
 4. In Supabase Auth URL settings, add your deployed Vercel domain as an allowed site/redirect URL. Add `http://localhost:3000` too if you test locally.
