@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LIST_POKEMONS } from './pokemonData';
 import { Gender, Student } from './types';
 import { applyGameEventToStudent, applyPetHpDeltaToStudent } from './gameEvents';
-import { addPokemonXp, createPokemonPetFromDexId, deterministicNatureFromInstanceId, getPokemonArtworkCandidates, totalXpForLevel } from './pokemonProgression';
+import { addPokemonXp, createPokemonPetFromDexId, deterministicNatureFromInstanceId, getPokemonArtworkCandidates, normalizeStudentPokemonData, totalXpForLevel } from './pokemonProgression';
 import { addTrainerXp, applyBadgeRewards, normalizeTrainerProgress } from './trainerProgression';
 
 const makeStudent = (overrides: Partial<Student> = {}): Student => ({
@@ -47,6 +47,51 @@ describe('pokemon progression', () => {
 
     expect(candidates[0]).toContain('/384.png');
     expect(candidates.some(url => url.includes('/10079.png'))).toBe(true);
+  });
+
+  it('preserves duplicate legendary eggs in inventory without overwriting the active egg', () => {
+    const activeEgg = {
+      instanceId: 'egg-active',
+      progress: 4,
+      status: 'egg' as const,
+      assignedDexId: 25,
+      kind: 'normal' as const,
+      requiredProgress: 10,
+      acquiredAt: 1,
+      source: 'shop' as const
+    };
+    const legendaryEggs = [
+      {
+        instanceId: 'egg-legendary-1',
+        progress: 0,
+        status: 'egg' as const,
+        assignedDexId: 150,
+        kind: 'legendary' as const,
+        requiredProgress: 30,
+        acquiredAt: 2,
+        source: 'boss' as const
+      },
+      {
+        instanceId: 'egg-legendary-2',
+        progress: 0,
+        status: 'egg' as const,
+        assignedDexId: 150,
+        kind: 'legendary' as const,
+        requiredProgress: 30,
+        acquiredAt: 3,
+        source: 'boss' as const
+      }
+    ];
+
+    const student = normalizeStudentPokemonData(makeStudent({
+      egg: activeEgg,
+      eggInventory: legendaryEggs
+    }));
+
+    expect(student.egg).toEqual(activeEgg);
+    expect(student.eggInventory).toHaveLength(2);
+    expect(student.eggInventory?.map(egg => egg.instanceId)).toEqual(['egg-legendary-1', 'egg-legendary-2']);
+    expect(student.eggInventory?.every(egg => egg.kind === 'legendary' && egg.requiredProgress === 30)).toBe(true);
   });
 });
 
@@ -103,6 +148,8 @@ describe('game events', () => {
     expect(result.student.pet).toBeUndefined();
     expect(result.student.pets).toHaveLength(0);
     expect(result.student.history[0].reason).toContain('hết HP');
+    expect(result.student.adventureJournal?.[0].type).toBe('pokemon-lost');
+    expect(result.student.adventureJournal?.[0].petInstanceId).toBe(pet.instanceId);
   });
 
   it('clamps positive HP changes at 100', () => {
@@ -136,6 +183,61 @@ describe('game events', () => {
     });
 
     expect(result.student.pet?.totalXp).toBe((pet.totalXp || 0) + 22);
+  });
+
+  it('records evolution milestones in the adventure journal', () => {
+    const pet = {
+      ...createPokemonPetFromDexId(1, undefined, { isShiny: false }),
+      totalXp: totalXpForLevel(5) - 1
+    };
+    const student = makeStudent({ pet, pets: [pet] });
+
+    const result = applyGameEventToStudent(student, {
+      type: 'SOLO_RESULT',
+      source: 'solo',
+      studentId: student.id,
+      auraDelta: 1,
+      timestamp: 1
+    });
+
+    expect(result.student.pet?.speciesName).toBe('Ivysaur');
+    expect(result.student.adventureJournal?.some(entry => entry.type === 'pokemon-evolved')).toBe(true);
+  });
+
+  it('records max bond milestones in the adventure journal', () => {
+    const pet = { ...createPokemonPetFromDexId(25, undefined, { isShiny: false }), bond: 99 };
+    const student = makeStudent({ pet, pets: [pet] });
+
+    const result = applyGameEventToStudent(student, {
+      type: 'HOMEWORK_COMPLETE',
+      source: 'homework',
+      studentId: student.id,
+      lessonKey: 'Class A:2026-08-17',
+      timestamp: 1
+    });
+
+    expect(result.student.pet?.bond).toBe(100);
+    expect(result.student.adventureJournal?.[0].type).toBe('bond-max');
+  });
+
+  it('records mastery milestones after level 30', () => {
+    const pet = {
+      ...createPokemonPetFromDexId(150, undefined, { isShiny: false }),
+      totalXp: totalXpForLevel(30) + 299
+    };
+    const student = makeStudent({ pet, pets: [pet] });
+
+    const result = applyGameEventToStudent(student, {
+      type: 'SOLO_RESULT',
+      source: 'solo',
+      studentId: student.id,
+      auraDelta: 1,
+      timestamp: 1
+    });
+
+    expect(result.student.pet?.masteryStars).toBe(1);
+    expect(result.uiEvents.some(event => event.type === 'mastery')).toBe(true);
+    expect(result.student.adventureJournal?.some(entry => entry.type === 'mastery')).toBe(true);
   });
 });
 

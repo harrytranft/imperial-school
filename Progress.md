@@ -2,6 +2,21 @@
 
 ## Completed
 
+- Added Boss Raid frequency settings and UI polish:
+  - Added Boss encounter frequency setting with 3 levels: Thường xuyên (3-5 Randoms), Thỉnh thoảng (6-9 Randoms), and Hiếm khi (10-14 Randoms).
+  - Added Boss Raid settings UI under Trainer Settings, including current class progress preview.
+  - Connected frequency to Boss state creation, encounter reset, existing-state recalibration, localStorage, Supabase sync, JSON export/import, and cloud backup/restore.
+  - Upgraded Boss HP hero and Boss Battle panel with clearer raid stats, richer party cards, result styling, and contributor scoreboard.
+  - Updated Supabase schema with `boss_encounter_frequency`.
+- Verified Boss frequency changes with `npm test`: 3 test files, 28 tests passed.
+- Verified production build with `npm run build`; Vite still reports only the existing large chunk size warning.
+- Completed Imperial School 3.0 final milestone sweep:
+  - Filled the remaining Adventure Journal milestone events for Pokémon lost, Pokémon evolved, Bond 100, Mastery stars, Shiny acquisition, and Boss successful rounds.
+  - Added Boss round visual feedback for success/failure resolutions in the Boss battle panel.
+  - Added regression tests for Adventure Journal milestone events, duplicate Legendary Egg inventory preservation, and Pokémon Expedition lifecycle/rewards.
+  - Updated `PLAN.md` Milestone A-H implementation checklist to completed.
+- Verified final test suite with `npm test`: 3 test files, 26 tests passed.
+- Verified final production build with `npm run build`; Vite still reports only the existing large chunk size warning.
 - Added Imperial School 3.0 Boss Raid Milestone 1:
   - Added per-class Boss state with pre-rolled encounter gaps, encounter readiness, active boss HP, fair participant queue, previous-party avoidance, and contribution tracking in `bossSystem.ts`.
   - Added Boss tab to Random with hidden-preview state and Boss priority when an encounter is ready, so ready Boss rounds cannot be bypassed by forcing Solo/Battle.

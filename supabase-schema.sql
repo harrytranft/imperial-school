@@ -25,6 +25,7 @@ create table if not exists public.user_settings (
   custom_ludo_tiles jsonb not null default '{}'::jsonb,
   lucky_wheel_rewards jsonb not null default '[]'::jsonb,
   boss_states_by_class jsonb not null default '{}'::jsonb,
+  boss_encounter_frequency text not null default 'occasional',
   updated_at_ms bigint not null default ((extract(epoch from now()) * 1000)::bigint),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -44,6 +45,9 @@ add column if not exists lucky_wheel_rewards jsonb not null default '[]'::jsonb;
 
 alter table public.user_settings
 add column if not exists boss_states_by_class jsonb not null default '{}'::jsonb;
+
+alter table public.user_settings
+add column if not exists boss_encounter_frequency text not null default 'occasional';
 
 alter table public.profiles enable row level security;
 alter table public.user_settings enable row level security;

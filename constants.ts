@@ -8,6 +8,7 @@ export const SKILLS_KEY = 'imperial_skills_v6';
 export const PET_SKILLS_KEY = 'imperial_pet_skills_v1';
 export const LUCKY_WHEEL_REWARDS_KEY = 'imperial_lucky_wheel_rewards_v1';
 export const BOSS_STATES_KEY = 'imperial_boss_states_by_class_v1';
+export const BOSS_ENCOUNTER_FREQUENCY_KEY = 'imperial_boss_encounter_frequency_v1';
 export const WHEEL_SPIN_SOUND_KEY = 'imperial_sound_wheel_spin';
 export const WHEEL_FINISH_SOUND_KEY = 'imperial_sound_wheel_finish';
 

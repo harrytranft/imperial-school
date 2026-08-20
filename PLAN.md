@@ -1859,22 +1859,22 @@ Implement trước, không làm feature khác trong cùng milestone.
 
 Tasks:
 
-- [ ] Add `RandomMode = solo | battle | boss`.
-- [ ] Add Boss tab.
-- [ ] Add Boss data types.
-- [ ] Create `bossSystem.ts`.
-- [ ] Add per-class Boss state.
-- [ ] Add encounter threshold 8–14 normal Randoms.
-- [ ] Add Boss priority to Random flow.
-- [ ] Add fair 5-trainer party queue.
-- [ ] Add `BossBattlePanel`.
-- [ ] Add Success resolve.
-- [ ] Add Failure resolve.
-- [ ] Add Boss HP persistence.
-- [ ] Add contribution tracking.
-- [ ] Add multi-release queue for multiple Pokémon deaths.
-- [ ] Add Boss defeated modal.
-- [ ] Add unit tests.
+- [x] Add `RandomMode = solo | battle | boss`.
+- [x] Add Boss tab.
+- [x] Add Boss data types.
+- [x] Create `bossSystem.ts`.
+- [x] Add per-class Boss state.
+- [x] Add encounter threshold 8–14 normal Randoms.
+- [x] Add Boss priority to Random flow.
+- [x] Add fair 5-trainer party queue.
+- [x] Add `BossBattlePanel`.
+- [x] Add Success resolve.
+- [x] Add Failure resolve.
+- [x] Add Boss HP persistence.
+- [x] Add contribution tracking.
+- [x] Add multi-release queue for multiple Pokémon deaths.
+- [x] Add Boss defeated modal.
+- [x] Add unit tests.
 
 Do not implement Legendary Egg reward yet if Egg Inventory dependency is not ready. Temporary dev reward can be disabled until Milestone B.
 
@@ -1882,18 +1882,18 @@ Do not implement Legendary Egg reward yet if Egg Inventory dependency is not rea
 
 ## MILESTONE B — LEGENDARY EGG + FINAL BOSS REWARD [P0]
 
-- [ ] Extend EggKind with `legendary`.
-- [ ] Add Legendary Pokémon pool.
-- [ ] Add `eggInventory`.
-- [ ] Add Egg Inventory UI.
-- [ ] Add Start Incubating flow.
-- [ ] Legendary Egg required progress = 30.
-- [ ] Legendary Egg not sold in Shop.
-- [ ] Boss Top 5 receive +5 Aura.
-- [ ] Boss Top 5 receive 1 Legendary Egg.
-- [ ] Prevent overwrite of active egg.
-- [ ] Persist/import egg inventory.
-- [ ] Test duplicate Legendary Eggs.
+- [x] Extend EggKind with `legendary`.
+- [x] Add Legendary Pokémon pool.
+- [x] Add `eggInventory`.
+- [x] Add Egg Inventory UI.
+- [x] Add Start Incubating flow.
+- [x] Legendary Egg required progress = 30.
+- [x] Legendary Egg not sold in Shop.
+- [x] Boss Top 5 receive +5 Aura.
+- [x] Boss Top 5 receive 1 Legendary Egg.
+- [x] Prevent overwrite of active egg.
+- [x] Persist/import egg inventory.
+- [x] Test duplicate Legendary Eggs.
 
 At completion of Milestone B, Boss feature is product-complete.
 
@@ -1901,64 +1901,64 @@ At completion of Milestone B, Boss feature is product-complete.
 
 ## MILESTONE C — NATURE + TRAINER PROGRESSION [P1]
 
-- [ ] Pokémon Nature.
-- [ ] Deterministic migration for old Pokémon.
-- [ ] Trainer Level / XP.
-- [ ] Trainer Titles.
-- [ ] Boss Hunter / Boss Slayer titles.
-- [ ] Integrate with existing game events.
-- [ ] Keep UI compact.
+- [x] Pokémon Nature.
+- [x] Deterministic migration for old Pokémon.
+- [x] Trainer Level / XP.
+- [x] Trainer Titles.
+- [x] Boss Hunter / Boss Slayer titles.
+- [x] Integrate with existing game events.
+- [x] Keep UI compact.
 
 ---
 
 ## MILESTONE D — GYM BADGES [P1]
 
-- [ ] Badge definitions.
-- [ ] Automatic detection.
-- [ ] Profile Badge section.
-- [ ] Boss Raid / Boss Slayer Badge.
-- [ ] Trainer XP reward for badge milestones.
+- [x] Badge definitions.
+- [x] Automatic detection.
+- [x] Profile Badge section.
+- [x] Boss Raid / Boss Slayer Badge.
+- [x] Trainer XP reward for badge milestones.
 
 ---
 
 ## MILESTONE E — EXPEDITION [P1]
 
-- [ ] Expedition data type.
-- [ ] Timestamp-based resolve.
-- [ ] Deterministic reward seed.
-- [ ] Expedition result card.
-- [ ] Nature modifiers.
-- [ ] Small rewards only.
+- [x] Expedition data type.
+- [x] Timestamp-based resolve.
+- [x] Deterministic reward seed.
+- [x] Expedition result card.
+- [x] Nature modifiers.
+- [x] Small rewards only.
 
 ---
 
 ## MILESTONE F — WEEKLY CHEST + EGG FRAGMENTS [P2]
 
-- [ ] Weekly progress.
-- [ ] Auto progress from existing events.
-- [ ] Weekly reset key.
-- [ ] Claim flow.
-- [ ] Egg fragments.
-- [ ] Egg crafting.
+- [x] Weekly progress.
+- [x] Auto progress from existing events.
+- [x] Weekly reset key.
+- [x] Claim flow.
+- [x] Egg fragments.
+- [x] Egg crafting.
 
 ---
 
 ## MILESTONE G — ADVENTURE JOURNAL [P2]
 
-- [ ] Milestone event journal.
-- [ ] Boss wins.
-- [ ] Pokémon lost history.
-- [ ] Trainer milestones.
-- [ ] Compact timeline UI.
+- [x] Milestone event journal.
+- [x] Boss wins.
+- [x] Pokémon lost history.
+- [x] Trainer milestones.
+- [x] Compact timeline UI.
 
 ---
 
 ## MILESTONE H — SUPPORT + SYNERGY + COSMETICS [P3]
 
-- [ ] Support Pokémon slot.
-- [ ] Tiny support bonuses.
-- [ ] Synergy definitions.
-- [ ] Mastery Aura visuals.
+- [x] Support Pokémon slot.
+- [x] Tiny support bonuses.
+- [x] Synergy definitions.
+- [x] Mastery Aura visuals.
 
 ---
 
@@ -2352,4 +2352,3 @@ Codex phải làm theo thứ tự:
 10. Không tự thay đổi luật HP = 0 → mất Pokémon.
 11. Không tự thay đổi reward Boss đã mô tả trong PLAN.
 12. Không refactor unrelated UI trong cùng commit nếu không cần thiết.
-

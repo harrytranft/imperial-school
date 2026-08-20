@@ -60,6 +60,14 @@ export interface PokemonHpDeltaResult {
   releaseEvent: PokemonReleaseEvent | null;
 }
 
+const appendAdventureJournalEntry = (
+  student: Student,
+  entry: NonNullable<Student['adventureJournal']>[number],
+): Student => ({
+  ...student,
+  adventureJournal: [entry, ...(student.adventureJournal || [])].slice(0, 80)
+});
+
 export const releasePokemonFromStudent = (
   student: Student,
   releasedPet: PokemonPet,
@@ -82,7 +90,14 @@ export const releasePokemonFromStudent = (
     ...student,
     pet: undefined,
     pets: remainingPets,
-    history: [historyItem, ...student.history].slice(0, 50)
+    history: [historyItem, ...student.history].slice(0, 50),
+    adventureJournal: [{
+      id: `${timestamp}${Math.random()}`,
+      timestamp,
+      type: 'pokemon-lost',
+      text: `${getPokemonDisplayName(releasedPet)} was lost after reaching 0 HP.`,
+      petInstanceId: releasedPet.instanceId
+    }, ...(student.adventureJournal || [])].slice(0, 80)
   };
 
   return {
@@ -171,6 +186,8 @@ const applyProgressToPet = (
   uiEvents: PokemonUiEvent[]
 ): Student => {
   let nextPet = normalizePokemonPet(pet);
+  let nextStudent = student;
+  const timestamp = Date.now();
   const finalXpGain = Math.max(0, Math.floor(xpGain));
 
   if (finalXpGain > 0) {
@@ -195,16 +212,32 @@ const applyProgressToPet = (
         type: 'evolution',
         message: `${xpResult.previousSpeciesName} tien hoa thanh ${nextPet.speciesName || nextPet.name}`
       });
+      nextStudent = appendAdventureJournalEntry(nextStudent, {
+        id: `${timestamp}${Math.random()}`,
+        timestamp,
+        type: 'pokemon-evolved',
+        text: `${xpResult.previousSpeciesName} evolved into ${nextPet.speciesName || nextPet.name}.`,
+        petInstanceId: nextPet.instanceId
+      });
     }
     if (xpResult.masteryStarsGained > 0) {
       uiEvents.push({
         type: 'mastery',
         message: `${getPokemonDisplayName(nextPet)} Mastery ${'⭐'.repeat(nextPet.masteryStars || 0)}`
       });
+      nextStudent = appendAdventureJournalEntry(nextStudent, {
+        id: `${timestamp}${Math.random()}`,
+        timestamp,
+        type: 'mastery',
+        text: `${getPokemonDisplayName(nextPet)} reached Mastery ${nextPet.masteryStars || 0} stars.`,
+        petInstanceId: nextPet.instanceId,
+        metadata: { masteryStars: nextPet.masteryStars || 0 }
+      });
     }
   }
 
   const synchronizeBonus = nextPet.passiveId === 'synchronize' && uiEvents.some(event => event.type === 'level-up') ? 2 : 0;
+  const previousBond = nextPet.bond || 0;
   const nextBond = clamp((nextPet.bond || 0) + bondGain + synchronizeBonus, 0, 100);
   const nextCharge = clamp((nextPet.charge || 0) + chargeGain, 0, 5);
   const nextHp = clamp((nextPet.hp ?? 100) + bonusHp, 0, 100);
@@ -222,11 +255,20 @@ const applyProgressToPet = (
       message: `${getPokemonDisplayName(nextPet)} +${bondGain + synchronizeBonus} Bond`
     });
   }
+  if (previousBond < 100 && nextBond >= 100) {
+    nextStudent = appendAdventureJournalEntry(nextStudent, {
+      id: `${timestamp}${Math.random()}`,
+      timestamp,
+      type: 'bond-max',
+      text: `${getPokemonDisplayName(nextPet)} reached Bond 100.`,
+      petInstanceId: nextPet.instanceId
+    });
+  }
 
   return {
-    ...student,
+    ...nextStudent,
     pet: nextPet,
-    pets: updatePetInCollection(student, nextPet)
+    pets: updatePetInCollection(nextStudent, nextPet)
   };
 };
 

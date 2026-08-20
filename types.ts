@@ -12,6 +12,7 @@ export interface HistoryItem {
 }
 
 export type EggKind = 'normal' | 'special' | 'legendary';
+export type BossEncounterFrequency = 'frequent' | 'occasional' | 'rare';
 
 export interface StudentEgg {
   instanceId?: string;

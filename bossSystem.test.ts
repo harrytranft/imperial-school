@@ -3,8 +3,10 @@ import { Gender, Student } from './types';
 import {
   BOSS_PARTY_SIZE,
   createClassBossState,
+  getBossEncounterFrequencyOption,
   incrementBossEncounterCounter,
   isBossEncounterReady,
+  recalibrateBossEncounterFrequency,
   resolveBossFailure,
   resolveBossSuccess,
   rollNextBossEncounterGap,
@@ -24,11 +26,37 @@ const makeStudent = (id: string, overrides: Partial<Student> = {}): Student => (
 });
 
 describe('boss system', () => {
-  it('rolls encounter gaps from 8 to 14', () => {
+  it('rolls default encounter gaps from 6 to 9', () => {
     for (let index = 0; index < 200; index += 1) {
-      expect(rollNextBossEncounterGap()).toBeGreaterThanOrEqual(8);
-      expect(rollNextBossEncounterGap()).toBeLessThanOrEqual(14);
+      expect(rollNextBossEncounterGap()).toBeGreaterThanOrEqual(6);
+      expect(rollNextBossEncounterGap()).toBeLessThanOrEqual(9);
     }
+  });
+
+  it('rolls encounter gaps by configured frequency', () => {
+    const frequent = getBossEncounterFrequencyOption('frequent');
+    const occasional = getBossEncounterFrequencyOption('occasional');
+    const rare = getBossEncounterFrequencyOption('rare');
+
+    for (let index = 0; index < 200; index += 1) {
+      expect(rollNextBossEncounterGap('frequent')).toBeGreaterThanOrEqual(frequent.minGap);
+      expect(rollNextBossEncounterGap('frequent')).toBeLessThanOrEqual(frequent.maxGap);
+      expect(rollNextBossEncounterGap('occasional')).toBeGreaterThanOrEqual(occasional.minGap);
+      expect(rollNextBossEncounterGap('occasional')).toBeLessThanOrEqual(occasional.maxGap);
+      expect(rollNextBossEncounterGap('rare')).toBeGreaterThanOrEqual(rare.minGap);
+      expect(rollNextBossEncounterGap('rare')).toBeLessThanOrEqual(rare.maxGap);
+    }
+  });
+
+  it('recalibrates existing boss state when frequency changes', () => {
+    const state = { ...createClassBossState('Class A'), randomsSinceLastEncounter: 4, nextEncounterAt: 14 };
+    const recalibrated = recalibrateBossEncounterFrequency(state, 'frequent', 2);
+
+    expect(recalibrated.nextEncounterAt).toBe(5);
+    expect(recalibrated.encounterReady).toBe(false);
+
+    const ready = incrementBossEncounterCounter(recalibrated, 3);
+    expect(isBossEncounterReady(ready)).toBe(true);
   });
 
   it('increments encounter counter and marks ready at threshold', () => {

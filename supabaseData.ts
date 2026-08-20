@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { ClassBossState, LuckyWheelReward, RankInfo, Skill, Student, LudoTileSpec } from './types';
+import { BossEncounterFrequency, ClassBossState, LuckyWheelReward, RankInfo, Skill, Student, LudoTileSpec } from './types';
 import { PetSkill } from './pokemonData';
 
 export interface UserSettingsData {
@@ -16,6 +16,7 @@ export interface UserSettingsData {
   customLudoTiles?: Record<number, LudoTileSpec>;
   luckyWheelRewards?: LuckyWheelReward[];
   bossStatesByClass?: Record<string, ClassBossState>;
+  bossEncounterFrequency?: BossEncounterFrequency;
   updatedAt?: number;
 }
 
@@ -65,6 +66,7 @@ export const fetchUserSettings = async (userId: string): Promise<UserSettingsDat
     customLudoTiles: data.custom_ludo_tiles || {},
     luckyWheelRewards: Array.isArray(data.lucky_wheel_rewards) ? data.lucky_wheel_rewards : undefined,
     bossStatesByClass: data.boss_states_by_class || {},
+    bossEncounterFrequency: data.boss_encounter_frequency || undefined,
     updatedAt: data.updated_at_ms || undefined
   };
 };
@@ -88,6 +90,7 @@ export const upsertUserSettings = async (userId: string, settings: UserSettingsD
       custom_ludo_tiles: sanitizeForSupabase(settings.customLudoTiles || {}),
       lucky_wheel_rewards: sanitizeForSupabase(settings.luckyWheelRewards || []),
       boss_states_by_class: sanitizeForSupabase(settings.bossStatesByClass || {}),
+      boss_encounter_frequency: settings.bossEncounterFrequency || 'occasional',
       updated_at_ms: updatedAt,
       updated_at: new Date(updatedAt).toISOString()
     }, { onConflict: 'user_id' });

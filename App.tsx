@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ActiveBossRound, AdventureJournalEntry, BossContribution, BossInstance, ClassBossState, EggKind, Student, Gender, HistoryItem, RankInfo, Skill, PokemonPet, PokemonReleaseEvent, LudoTileSpec, LuckyWheelReward, LuckyWheelRewardType, StudentEgg, AttendanceStatus } from './types';
+import { ActiveBossRound, AdventureJournalEntry, BossContribution, BossEncounterFrequency, BossInstance, ClassBossState, EggKind, Student, Gender, HistoryItem, RankInfo, Skill, PokemonPet, PokemonReleaseEvent, LudoTileSpec, LuckyWheelReward, LuckyWheelRewardType, StudentEgg, AttendanceStatus } from './types';
 import { 
   STORAGE_KEY, DEFAULT_RANKS_MALE, DEFAULT_RANKS_FEMALE, 
   RANKS_KEY_MALE, RANKS_KEY_FEMALE, DEFAULT_SKILLS, SKILLS_KEY,
-  BOSS_STATES_KEY, DEFAULT_LUDO_TILES, PET_SKILLS_KEY, DEFAULT_LUCKY_WHEEL_REWARDS,
+  BOSS_STATES_KEY, BOSS_ENCOUNTER_FREQUENCY_KEY, DEFAULT_LUDO_TILES, PET_SKILLS_KEY, DEFAULT_LUCKY_WHEEL_REWARDS,
   LUCKY_WHEEL_REWARDS_KEY, WHEEL_SPIN_SOUND_KEY, WHEEL_FINISH_SOUND_KEY
 } from './constants';
 import { StudentCard } from './components/StudentCard';
@@ -53,13 +53,17 @@ import {
   trainerXpNeededForNextLevel
 } from './trainerProgression';
 import {
+  BOSS_ENCOUNTER_FREQUENCY_OPTIONS,
   BOSS_PARTY_SIZE,
+  DEFAULT_BOSS_ENCOUNTER_FREQUENCY,
   createClassBossState,
+  getBossEncounterFrequencyOption,
   getBossTopContributors,
   incrementBossEncounterCounter,
   isBossEncounterReady,
   normalizeBossStatesByClass,
   normalizeClassBossState,
+  recalibrateBossEncounterFrequency,
   resolveBossFailure,
   resolveBossSuccess,
   selectBossParty
@@ -69,6 +73,10 @@ import { claimReadyExpedition, ensureActiveExpedition, markExpeditionReadyIfDue 
 
 type Screen = 'plaza' | 'class' | 'profile' | 'settings';
 type RandomMode = 'solo' | 'battle' | 'boss';
+
+const isBossEncounterFrequency = (value: unknown): value is BossEncounterFrequency => {
+  return value === 'frequent' || value === 'occasional' || value === 'rare';
+};
 
 const LUDO_FINISH_TILE = 49;
 
@@ -387,9 +395,14 @@ const App: React.FC = () => {
     ludoTurns: BattleLudoTurn[];
   } | null>(null);
   const [uncalledMap, setUncalledMap] = useState<Record<string, string[]>>({}); // Fair round-robin random queue
+  const [bossEncounterFrequency, setBossEncounterFrequency] = useState<BossEncounterFrequency>(() => {
+    const saved = localStorage.getItem(BOSS_ENCOUNTER_FREQUENCY_KEY);
+    return isBossEncounterFrequency(saved) ? saved : DEFAULT_BOSS_ENCOUNTER_FREQUENCY;
+  });
   const [bossStatesByClass, setBossStatesByClass] = useState<Record<string, ClassBossState>>({});
   const [activeBossRound, setActiveBossRound] = useState<ActiveBossRound | null>(null);
   const [bossRoundResolving, setBossRoundResolving] = useState(false);
+  const [bossRoundVisualResult, setBossRoundVisualResult] = useState<'success' | 'failure' | null>(null);
   const [bossDefeatedAnnouncement, setBossDefeatedAnnouncement] = useState<{
     boss: BossInstance;
     topContributors: BossContribution[];
@@ -759,7 +772,12 @@ const App: React.FC = () => {
             setLuckyWheelDisplayRewards(cloudData.luckyWheelRewards);
             localStorage.setItem(LUCKY_WHEEL_REWARDS_KEY, JSON.stringify(cloudData.luckyWheelRewards));
           }
-          const cloudBossStates = normalizeBossStatesByClass(cloudData.bossStatesByClass || {});
+          const cloudBossFrequency = isBossEncounterFrequency(cloudData.bossEncounterFrequency)
+            ? cloudData.bossEncounterFrequency
+            : DEFAULT_BOSS_ENCOUNTER_FREQUENCY;
+          setBossEncounterFrequency(cloudBossFrequency);
+          localStorage.setItem(BOSS_ENCOUNTER_FREQUENCY_KEY, cloudBossFrequency);
+          const cloudBossStates = normalizeBossStatesByClass(cloudData.bossStatesByClass || {}, cloudBossFrequency);
           setBossStatesByClass(cloudBossStates);
           localStorage.setItem(BOSS_STATES_KEY, JSON.stringify(cloudBossStates));
           setLastSyncedTime(cloudData.updatedAt || Date.now());
@@ -778,7 +796,8 @@ const App: React.FC = () => {
             wheelFinishSoundUrl: cloudData.wheelFinishSoundUrl || '',
             customLudoTiles: cloudData.customLudoTiles || {},
             luckyWheelRewards: cloudData.luckyWheelRewards || DEFAULT_LUCKY_WHEEL_REWARDS,
-            bossStatesByClass: cloudBossStates
+            bossStatesByClass: cloudBossStates,
+            bossEncounterFrequency: cloudBossFrequency
           });
 
           // Also save a fallback local copy
@@ -818,8 +837,12 @@ const App: React.FC = () => {
 
           const savedLuckyWheelRewards = localStorage.getItem(LUCKY_WHEEL_REWARDS_KEY);
           const localLuckyWheelRewards = savedLuckyWheelRewards ? JSON.parse(savedLuckyWheelRewards) : DEFAULT_LUCKY_WHEEL_REWARDS;
+          const savedBossFrequency = localStorage.getItem(BOSS_ENCOUNTER_FREQUENCY_KEY);
+          const localBossFrequency = isBossEncounterFrequency(savedBossFrequency)
+            ? savedBossFrequency
+            : DEFAULT_BOSS_ENCOUNTER_FREQUENCY;
           const savedBossStates = localStorage.getItem(BOSS_STATES_KEY);
-          const localBossStates = savedBossStates ? normalizeBossStatesByClass(JSON.parse(savedBossStates)) : {};
+          const localBossStates = savedBossStates ? normalizeBossStatesByClass(JSON.parse(savedBossStates), localBossFrequency) : {};
 
           // Push local state to cloud to prevent data loss on onboarding
           const updatedAt = await upsertUserSettings(user.uid, {
@@ -835,7 +858,8 @@ const App: React.FC = () => {
             wheelFinishSoundUrl,
             customLudoTiles,
             luckyWheelRewards: localLuckyWheelRewards,
-            bossStatesByClass: localBossStates
+            bossStatesByClass: localBossStates,
+            bossEncounterFrequency: localBossFrequency
           });
 
           lastSyncedSnapshotRef.current = JSON.stringify({
@@ -851,7 +875,8 @@ const App: React.FC = () => {
             wheelFinishSoundUrl,
             customLudoTiles,
             luckyWheelRewards: localLuckyWheelRewards,
-            bossStatesByClass: localBossStates
+            bossStatesByClass: localBossStates,
+            bossEncounterFrequency: localBossFrequency
           });
           
           setStudents(localStudents);
@@ -861,6 +886,7 @@ const App: React.FC = () => {
           setPetSkills(localPetSkills);
           setLuckyWheelRewards(localLuckyWheelRewards);
           setLuckyWheelDisplayRewards(localLuckyWheelRewards);
+          setBossEncounterFrequency(localBossFrequency);
           setBossStatesByClass(localBossStates);
           setLastSyncedTime(updatedAt);
         }
@@ -895,7 +921,8 @@ const App: React.FC = () => {
       wheelFinishSoundUrl,
       customLudoTiles,
       luckyWheelRewards,
-      bossStatesByClass
+      bossStatesByClass,
+      bossEncounterFrequency
     });
 
     // DIFFERENTIAL INCREMENTAL SYNC CHECK:
@@ -921,7 +948,8 @@ const App: React.FC = () => {
           wheelFinishSoundUrl,
           customLudoTiles,
           luckyWheelRewards,
-          bossStatesByClass
+          bossStatesByClass,
+          bossEncounterFrequency
         });
 
         lastSyncedSnapshotRef.current = currentSnapshot;
@@ -934,7 +962,7 @@ const App: React.FC = () => {
     }, 1500); // 1.5s debounce to group multiple rapid edits together
 
     return () => clearTimeout(timer);
-  }, [students, ranksMale, ranksFemale, skills, petSkills, posSoundUrl, negSoundUrl, timerSoundUrl, wheelSpinSoundUrl, wheelFinishSoundUrl, customLudoTiles, luckyWheelRewards, bossStatesByClass, user, initialCloudLoadComplete, cloudLoadSuccess]);
+  }, [students, ranksMale, ranksFemale, skills, petSkills, posSoundUrl, negSoundUrl, timerSoundUrl, wheelSpinSoundUrl, wheelFinishSoundUrl, customLudoTiles, luckyWheelRewards, bossStatesByClass, bossEncounterFrequency, user, initialCloudLoadComplete, cloudLoadSuccess]);
 
   // Sync Ludo position state maps whenever students array loads or changes
   useEffect(() => {
@@ -1036,10 +1064,15 @@ const App: React.FC = () => {
         setLuckyWheelDisplayRewards(DEFAULT_LUCKY_WHEEL_REWARDS);
       }
 
+      const savedBossFrequency = localStorage.getItem(BOSS_ENCOUNTER_FREQUENCY_KEY);
+      const localBossFrequency = isBossEncounterFrequency(savedBossFrequency)
+        ? savedBossFrequency
+        : DEFAULT_BOSS_ENCOUNTER_FREQUENCY;
+      setBossEncounterFrequency(localBossFrequency);
       const savedBossStates = localStorage.getItem(BOSS_STATES_KEY);
       if (savedBossStates) {
         try {
-          setBossStatesByClass(normalizeBossStatesByClass(JSON.parse(savedBossStates)));
+          setBossStatesByClass(normalizeBossStatesByClass(JSON.parse(savedBossStates), localBossFrequency));
         } catch (err) {
           console.error("Failed to parse saved boss states", err);
           setBossStatesByClass({});
@@ -1061,6 +1094,10 @@ const App: React.FC = () => {
       localStorage.setItem(BOSS_STATES_KEY, JSON.stringify(bossStatesByClass));
     }
   }, [bossStatesByClass, user]);
+
+  useEffect(() => {
+    localStorage.setItem(BOSS_ENCOUNTER_FREQUENCY_KEY, bossEncounterFrequency);
+  }, [bossEncounterFrequency]);
 
   useEffect(() => { 
     if (!user) {
@@ -1120,8 +1157,12 @@ const App: React.FC = () => {
   const editingPetEvolutionPreview = useMemo(() => getNextEvolutionPreview(editingStudent?.pet), [editingStudent?.pet]);
   const classOptions = useMemo(() => classes.filter(c => c !== 'Tất cả'), [classes]);
   const activeRandomClassName = filterClass !== 'Tất cả' ? filterClass : '';
+  const currentBossFrequencyOption = useMemo(
+    () => getBossEncounterFrequencyOption(bossEncounterFrequency),
+    [bossEncounterFrequency]
+  );
   const currentBossState = activeRandomClassName
-    ? normalizeClassBossState(bossStatesByClass[activeRandomClassName], activeRandomClassName)
+    ? normalizeClassBossState(bossStatesByClass[activeRandomClassName], activeRandomClassName, bossEncounterFrequency)
     : null;
   const activeBossParty = activeBossRound
     ? activeBossRound.partyStudentIds
@@ -1148,10 +1189,10 @@ const App: React.FC = () => {
       if (prev[activeRandomClassName]) return prev;
       return {
         ...prev,
-        [activeRandomClassName]: createClassBossState(activeRandomClassName)
+        [activeRandomClassName]: createClassBossState(activeRandomClassName, Date.now(), bossEncounterFrequency)
       };
     });
-  }, [activeRandomClassName]);
+  }, [activeRandomClassName, bossEncounterFrequency]);
 
   const activeLudoClassName = ludoClassName || (filterClass !== 'Tất cả' ? filterClass : classOptions[0] || '');
   const ludoRaceStudents = useMemo(() => {
@@ -1393,6 +1434,13 @@ const App: React.FC = () => {
           text: `${getPokemonDisplayName(hatchedPet)} hatched for ${student.name}.`,
           petInstanceId: hatchedPet.instanceId
         });
+        if (hatchedPet.isShiny) {
+          currentStudent = appendAdventureJournal(currentStudent, {
+            type: 'shiny-acquired',
+            text: `${student.name} discovered Shiny ${getPokemonDisplayName(hatchedPet)}.`,
+            petInstanceId: hatchedPet.instanceId
+          });
+        }
       }
     }
 
@@ -2190,6 +2238,7 @@ const App: React.FC = () => {
       customLudoTiles,
       luckyWheelRewards,
       bossStatesByClass,
+      bossEncounterFrequency,
       exportedAt: Date.now()
     };
     const jsonString = JSON.stringify(data, null, 2);
@@ -2253,9 +2302,14 @@ const App: React.FC = () => {
           setLuckyWheelDisplayRewards(data.luckyWheelRewards);
           localStorage.setItem(LUCKY_WHEEL_REWARDS_KEY, JSON.stringify(data.luckyWheelRewards));
         }
+        const importedBossFrequency = isBossEncounterFrequency(data.bossEncounterFrequency)
+          ? data.bossEncounterFrequency
+          : bossEncounterFrequency;
         const importedBossStates = data.bossStatesByClass && typeof data.bossStatesByClass === 'object'
-          ? normalizeBossStatesByClass(data.bossStatesByClass)
+          ? normalizeBossStatesByClass(data.bossStatesByClass, importedBossFrequency)
           : {};
+        setBossEncounterFrequency(importedBossFrequency);
+        localStorage.setItem(BOSS_ENCOUNTER_FREQUENCY_KEY, importedBossFrequency);
         setBossStatesByClass(importedBossStates);
         localStorage.setItem(BOSS_STATES_KEY, JSON.stringify(importedBossStates));
 
@@ -2275,7 +2329,8 @@ const App: React.FC = () => {
               wheelFinishSoundUrl: data.wheelFinishSoundUrl || wheelFinishSoundUrl,
               customLudoTiles: data.customLudoTiles || customLudoTiles,
               luckyWheelRewards: data.luckyWheelRewards || luckyWheelRewards,
-              bossStatesByClass: importedBossStates
+              bossStatesByClass: importedBossStates,
+              bossEncounterFrequency: importedBossFrequency
           }).then((updatedAt) => {
             setLastSyncedTime(updatedAt);
             setIsSyncing(false);
@@ -2314,7 +2369,9 @@ const App: React.FC = () => {
         wheelSpinSoundUrl,
         wheelFinishSoundUrl,
         customLudoTiles,
-        luckyWheelRewards
+        luckyWheelRewards,
+        bossStatesByClass,
+        bossEncounterFrequency
       });
       setLastSyncedTime(updatedAt);
       if (!silent) {
@@ -2385,6 +2442,14 @@ const App: React.FC = () => {
           setLuckyWheelDisplayRewards(cloudData.luckyWheelRewards);
           localStorage.setItem(LUCKY_WHEEL_REWARDS_KEY, JSON.stringify(cloudData.luckyWheelRewards));
         }
+        const cloudBossFrequency = isBossEncounterFrequency(cloudData.bossEncounterFrequency)
+          ? cloudData.bossEncounterFrequency
+          : DEFAULT_BOSS_ENCOUNTER_FREQUENCY;
+        const cloudBossStates = normalizeBossStatesByClass(cloudData.bossStatesByClass || {}, cloudBossFrequency);
+        setBossEncounterFrequency(cloudBossFrequency);
+        localStorage.setItem(BOSS_ENCOUNTER_FREQUENCY_KEY, cloudBossFrequency);
+        setBossStatesByClass(cloudBossStates);
+        localStorage.setItem(BOSS_STATES_KEY, JSON.stringify(cloudBossStates));
         setLastSyncedTime(cloudData.updatedAt || Date.now());
         alert("Đã khôi phục dữ liệu từ đám mây thành công!");
       } else {
@@ -2823,7 +2888,7 @@ const App: React.FC = () => {
   const incrementBossCounterForClass = (className?: string) => {
     if (!className) return;
     setBossStatesByClass(prev => {
-      const state = normalizeClassBossState(prev[className], className);
+      const state = normalizeClassBossState(prev[className], className, bossEncounterFrequency);
       return {
         ...prev,
         [className]: incrementBossEncounterCounter(state)
@@ -2879,7 +2944,7 @@ const App: React.FC = () => {
         setShowRandomModal(true);
         return;
       }
-      const bossState = normalizeClassBossState(bossStatesByClass[activeRandomClassName], activeRandomClassName);
+      const bossState = normalizeClassBossState(bossStatesByClass[activeRandomClassName], activeRandomClassName, bossEncounterFrequency);
       const bossReady = isBossEncounterReady(bossState);
       if (bossReady && openBossEncounter(activeRandomClassName, { ...bossState, encounterReady: true })) return;
       if (forceMode === 'boss') {
@@ -2963,7 +3028,7 @@ const App: React.FC = () => {
   const handleResolveBossRound = (result: 'success' | 'failure') => {
     if (!activeBossRound || bossRoundResolving) return;
     const className = activeBossRound.className;
-    const state = normalizeClassBossState(bossStatesByClass[className], className);
+    const state = normalizeClassBossState(bossStatesByClass[className], className, bossEncounterFrequency);
     if (state.boss.instanceId !== activeBossRound.bossInstanceId) {
       alert('Boss round này đã cũ. Hãy Random lại để mở encounter mới.');
       setActiveBossRound(null);
@@ -2971,11 +3036,13 @@ const App: React.FC = () => {
     }
 
     setBossRoundResolving(true);
+    setBossRoundVisualResult(result);
+    window.setTimeout(() => setBossRoundVisualResult(null), 900);
     const timestamp = Date.now();
     const partyIds = activeBossRound.partyStudentIds;
     const resolution = result === 'success'
-      ? resolveBossSuccess(state, partyIds, activeBossRound.roundId, timestamp)
-      : resolveBossFailure(state, partyIds, activeBossRound.roundId, timestamp);
+      ? resolveBossSuccess(state, partyIds, activeBossRound.roundId, timestamp, bossEncounterFrequency)
+      : resolveBossFailure(state, partyIds, activeBossRound.roundId, timestamp, bossEncounterFrequency);
     const topRewardIds = resolution.bossDefeated ? new Set(resolution.topContributors.map(contribution => contribution.studentId)) : new Set<string>();
     const releaseEvents: PokemonReleaseEvent[] = [];
     const journeyEvents: PokemonUiEvent[] = [];
@@ -2999,6 +3066,11 @@ const App: React.FC = () => {
         };
         nextStudent = applyTrainerJourneyProgress(nextStudent, 10, timestamp, journeyEvents, 'Boss Success');
         nextStudent = addWeeklyChestProgress(nextStudent, 5);
+        nextStudent = appendAdventureJournal(nextStudent, {
+          type: 'boss-win',
+          text: `${nextStudent.name} helped land a successful hit on ${state.boss.name}.`,
+          metadata: { damage: state.boss.damagePerSuccessfulStudent }
+        }, timestamp);
       }
 
       if (result === 'failure' && partyIds.includes(student.id)) {
@@ -3176,12 +3248,19 @@ const App: React.FC = () => {
           if (s.pet && !currentPets.some(p => isSamePokemon(p, s.pet))) {
             currentPets.push(s.pet);
           }
-          const updatedS: Student = {
+          let updatedS: Student = {
             ...s,
             pet: result.pokemon,
             pets: [result.pokemon, ...currentPets],
             history: [historyItem, ...s.history].slice(0, 50)
           };
+          if (result.pokemon.isShiny) {
+            updatedS = appendAdventureJournal(updatedS, {
+              type: 'shiny-acquired',
+              text: `${s.name} received Shiny ${getPokemonDisplayName(result.pokemon)} from Lucky Wheel.`,
+              petInstanceId: result.pokemon.instanceId
+            });
+          }
           updatedTarget = updatedS;
           return updatedS;
         }
@@ -4088,6 +4167,24 @@ const App: React.FC = () => {
     setSettingsCollapsed(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
+  const handleBossEncounterFrequencyChange = (frequency: BossEncounterFrequency) => {
+    setBossEncounterFrequency(frequency);
+    localStorage.setItem(BOSS_ENCOUNTER_FREQUENCY_KEY, frequency);
+    setBossStatesByClass(prev => {
+      const timestamp = Date.now();
+      return Object.fromEntries(
+        Object.entries(prev).map(([className, state]) => [
+          className,
+          recalibrateBossEncounterFrequency(
+            normalizeClassBossState(state, className, frequency),
+            frequency,
+            timestamp
+          )
+        ])
+      );
+    });
+  };
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-[#5d4037] flex flex-col items-center justify-center text-white font-sans">
@@ -4789,6 +4886,20 @@ const App: React.FC = () => {
                               };
                               const journeyEvents: PokemonUiEvent[] = [];
                               currentMerged = applyTrainerJourneyProgress(currentMerged, 0, Date.now(), journeyEvents);
+                              if (isHatching && updatedPet) {
+                                currentMerged = appendAdventureJournal(currentMerged, {
+                                  type: 'pokemon-hatched',
+                                  text: `${getPokemonDisplayName(updatedPet)} hatched for ${editingStudent.name}.`,
+                                  petInstanceId: updatedPet.instanceId
+                                });
+                              }
+                              if (isHatching && updatedPet?.isShiny) {
+                                currentMerged = appendAdventureJournal(currentMerged, {
+                                  type: 'shiny-acquired',
+                                  text: `${editingStudent.name} discovered Shiny ${getPokemonDisplayName(updatedPet)}.`,
+                                  petInstanceId: updatedPet.instanceId
+                                });
+                              }
                               setEditingStudent(currentMerged);
                               setStudents(prev => prev.map(s => s.id === editingStudent.id ? currentMerged : s));
                             }}
@@ -4833,6 +4944,18 @@ const App: React.FC = () => {
                                  };
                                  const journeyEvents: PokemonUiEvent[] = [];
                                  currentMerged = applyTrainerJourneyProgress(currentMerged, 0, Date.now(), journeyEvents);
+                                 currentMerged = appendAdventureJournal(currentMerged, {
+                                   type: 'pokemon-hatched',
+                                   text: `${getPokemonDisplayName(updatedPet)} hatched for ${editingStudent.name}.`,
+                                   petInstanceId: updatedPet.instanceId
+                                 });
+                                 if (updatedPet.isShiny) {
+                                   currentMerged = appendAdventureJournal(currentMerged, {
+                                     type: 'shiny-acquired',
+                                     text: `${editingStudent.name} discovered Shiny ${getPokemonDisplayName(updatedPet)}.`,
+                                     petInstanceId: updatedPet.instanceId
+                                   });
+                                 }
 
                                  setEditingStudent(currentMerged);
                                  setStudents(prev => prev.map(s => s.id === editingStudent.id ? currentMerged : s));
@@ -5311,6 +5434,50 @@ const App: React.FC = () => {
               </div>
             </SettingsSection>
 
+            <SettingsSection id="bossRaid" icon="👹" title="Boss Raid" subtitle="Cài tần suất Boss xuất hiện sau các lượt Random Solo/Battle." collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
+              <div className="rounded-[32px] border border-red-100 bg-gradient-to-br from-red-50 via-white to-amber-50 p-5 text-left shadow-sm">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  {BOSS_ENCOUNTER_FREQUENCY_OPTIONS.map(option => {
+                    const active = bossEncounterFrequency === option.id;
+                    return (
+                      <button
+                        key={option.id}
+                        onClick={() => handleBossEncounterFrequencyChange(option.id)}
+                        className={`rounded-3xl border-2 p-4 text-left transition-all ${
+                          active
+                            ? 'border-red-700 bg-red-800 text-white shadow-xl shadow-red-900/20'
+                            : 'border-red-100 bg-white text-red-950 hover:border-red-300 hover:bg-red-50'
+                        }`}
+                      >
+                        <p className="text-sm font-black uppercase tracking-wider">{option.label}</p>
+                        <p className={`mt-2 text-xs font-bold leading-relaxed ${active ? 'text-red-50' : 'text-red-700'}`}>
+                          {option.description}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-3 rounded-3xl border border-amber-200 bg-white/80 p-4 text-xs font-black text-amber-950 md:grid-cols-3">
+                  <div>
+                    <p className="uppercase tracking-[0.18em] text-amber-500">Đang chọn</p>
+                    <p className="mt-1 text-base text-red-900">{currentBossFrequencyOption.label}</p>
+                  </div>
+                  <div>
+                    <p className="uppercase tracking-[0.18em] text-amber-500">Khoảng xuất hiện</p>
+                    <p className="mt-1 text-base text-red-900">{currentBossFrequencyOption.minGap}-{currentBossFrequencyOption.maxGap} Random</p>
+                  </div>
+                  <div>
+                    <p className="uppercase tracking-[0.18em] text-amber-500">Lớp hiện tại</p>
+                    <p className="mt-1 text-base text-red-900">
+                      {currentBossState
+                        ? `${currentBossState.randomsSinceLastEncounter}/${currentBossState.nextEncounterAt} lượt`
+                        : 'Chọn một lớp'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </SettingsSection>
+
             <SettingsSection id="sound" icon="🔊" title="Cài Đặt Âm Thanh" subtitle="Youtube hoặc audio URL cho cộng điểm, trừ điểm, timer và vòng quay may mắn." collapsedSections={settingsCollapsed} onToggle={toggleSettingsSection}>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
                 {[
@@ -5723,7 +5890,10 @@ const App: React.FC = () => {
                     party={activeBossParty}
                     topContributors={currentBossTopContributors}
                     randomsSinceLastEncounter={currentBossState.randomsSinceLastEncounter}
+                    nextEncounterAt={currentBossState.nextEncounterAt}
+                    frequencyLabel={currentBossFrequencyOption.label}
                     resolving={bossRoundResolving}
+                    visualResult={bossRoundVisualResult}
                     onSuccess={() => handleResolveBossRound('success')}
                     onFailure={() => handleResolveBossRound('failure')}
                   />
@@ -5736,7 +5906,7 @@ const App: React.FC = () => {
                     </p>
                     <p className="mt-4 rounded-2xl bg-white px-4 py-3 text-xs font-black uppercase tracking-wider text-red-700">
                       {currentBossState
-                        ? `Normal Random since last encounter: ${currentBossState.randomsSinceLastEncounter}`
+                        ? `Boss Frequency: ${currentBossFrequencyOption.label} · ${currentBossState.randomsSinceLastEncounter}/${currentBossState.nextEncounterAt} Random`
                         : 'Chọn một lớp cụ thể để kích hoạt Boss Raid per-class.'}
                     </p>
                     {currentBossState && (
